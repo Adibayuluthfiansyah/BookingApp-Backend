@@ -5,20 +5,19 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
     /**
-     * Admin Login
+     * Login user (admin atau customer)
      */
-    public function adminLogin(Request $request)
+    public function login(Request $request)
     {
         $request->validate([
             'email' => 'required|email',
-            'password' => 'required|min:6',
+            'password' => 'required',
         ]);
 
         $user = User::where('email', $request->email)->first();
@@ -26,20 +25,15 @@ class AuthController extends Controller
         if (!$user || !Hash::check($request->password, $user->password)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Email atau password salah'
+                'message' => 'Email atau password salah.'
             ], 401);
         }
 
-        // Check if user is admin
-        if (!$user->isAdmin()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Akses tidak diizinkan. Hanya admin yang dapat masuk.'
-            ], 403);
-        }
+        // Hapus token lama
+        $user->tokens()->delete();
 
-        // Create token
-        $token = $user->createToken('admin-token')->plainTextToken;
+        // Create token baru dengan role sebagai ability
+        $token = $user->createToken('auth-token', [$user->role])->plainTextToken;
 
         return response()->json([
             'success' => true,
@@ -49,54 +43,15 @@ class AuthController extends Controller
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
-                    'phone' => $user->phone,
                     'role' => $user->role,
                 ],
                 'token' => $token,
             ]
-        ]);
+        ], 200);
     }
 
     /**
-     * Customer Login
-     */
-    public function customerLogin(Request $request)
-    {
-        $request->validate([
-            'email' => 'required|email',
-            'password' => 'required|min:6',
-        ]);
-
-        $user = User::where('email', $request->email)->first();
-
-        if (!$user || !Hash::check($request->password, $user->password)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Email atau password salah'
-            ], 401);
-        }
-
-        // Create token
-        $token = $user->createToken('customer-token')->plainTextToken;
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Login berhasil',
-            'data' => [
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'phone' => $user->phone,
-                    'role' => $user->role,
-                ],
-                'token' => $token,
-            ]
-        ]);
-    }
-
-    /**
-     * Logout
+     * Logout user
      */
     public function logout(Request $request)
     {
@@ -105,65 +60,46 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Logout berhasil'
-        ]);
+        ], 200);
     }
 
     /**
-     * Get authenticated user
+     * Get current authenticated user
      */
     public function me(Request $request)
     {
-        $user = $request->user();
-
         return response()->json([
             'success' => true,
             'data' => [
                 'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'phone' => $user->phone,
-                    'role' => $user->role,
-                ],
+                    'id' => $request->user()->id,
+                    'name' => $request->user()->name,
+                    'email' => $request->user()->email,
+                    'role' => $request->user()->role,
+                ]
             ]
-        ]);
+        ], 200);
     }
 
     /**
-     * Register Customer
+     * Refresh token
      */
-    public function register(Request $request)
+    public function refresh(Request $request)
     {
-        $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:6|confirmed',
-            'phone' => 'nullable|string|max:20',
-        ]);
+        $user = $request->user();
 
-        $user = User::create([
-            'name' => $request->name,
-            'email' => $request->email,
-            'password' => Hash::make($request->password),
-            'phone' => $request->phone,
-            'role' => 'customer',
-        ]);
+        // Delete current token
+        $request->user()->currentAccessToken()->delete();
 
-        $token = $user->createToken('customer-token')->plainTextToken;
+        // Create new token
+        $token = $user->createToken('auth-token', [$user->role])->plainTextToken;
 
         return response()->json([
             'success' => true,
-            'message' => 'Registrasi berhasil',
+            'message' => 'Token berhasil di-refresh',
             'data' => [
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'phone' => $user->phone,
-                    'role' => $user->role,
-                ],
                 'token' => $token,
             ]
-        ], 201);
+        ], 200);
     }
 }

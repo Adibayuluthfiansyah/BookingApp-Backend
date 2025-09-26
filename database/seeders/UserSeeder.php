@@ -2,34 +2,38 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\Hash;
 use App\Models\User;
+use Illuminate\Support\Facades\Hash;
 
-class UserSeeder extends Seeder
+class AdminSeeder extends Seeder
 {
-    /**
-     * Run the database seeds.
-     */
     public function run(): void
     {
-        // Create admin user
-        User::create([
-            'name' => 'Admin',
-            'email' => 'admin@bookingfield.com',
-            'password' => Hash::make('admin123'),
-            'role' => 'admin',
-            'phone' => '08123456789',
-        ]);
+        // Create Admin User
+        User::updateOrCreate(
+            ['email' => 'admin@bookingfield.com'],
+            [
+                'name' => 'Admin Kashmir',
+                'email' => 'admin@bookingfield.com',
+                'password' => Hash::make('admin123'),
+                'role' => 'admin',
+            ]
+        );
 
-        // Create test customer
-        User::create([
-            'name' => 'Customer Test',
-            'email' => 'customer@test.com',
-            'password' => Hash::make('password123'),
-            'role' => 'customer',
-            'phone' => '08987654321',
-        ]);
+        // Create Customer Demo
+        User::updateOrCreate(
+            ['email' => 'customer@bookingfield.com'],
+            [
+                'name' => 'Customer Demo',
+                'email' => 'customer@bookingfield.com',
+                'password' => Hash::make('customer123'),
+                'role' => 'customer',
+            ]
+        );
+
+        echo "✅ Users created successfully!\n";
+        echo "Admin: admin@bookingfield.com / admin123\n";
+        echo "Customer: customer@bookingfield.com / customer123\n";
     }
 }

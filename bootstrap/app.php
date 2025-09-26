@@ -12,13 +12,24 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        $middleware->api(prepend: [
-            \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
+        // Register alias middleware
+        $middleware->alias([
+            'role' => \App\Http\Middleware\CheckRole::class,
         ]);
 
-        $middleware->alias([
-            'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
-            'admin' => \App\Http\Middleware\AdminMiddleware::class,
+        // IMPORTANT: Enable CORS for API
+        $middleware->api(prepend: [
+            \Illuminate\Http\Middleware\HandleCors::class,
+        ]);
+
+        // Disable CSRF for API routes
+        $middleware->validateCsrfTokens(except: [
+            'api/*',
+        ]);
+
+        // Encrypt cookies
+        $middleware->encryptCookies(except: [
+            //
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
