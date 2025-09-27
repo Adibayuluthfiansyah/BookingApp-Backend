@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\VenueController;
 use App\Http\Controllers\Api\AuthController;
 
 // Public routes
@@ -30,7 +31,12 @@ Route::middleware('auth:sanctum')->group(function () {
             ]);
         });
 
-        // Tambahkan route admin lainnya di sini
+        // Admin routes untuk manage venues
+        Route::prefix('admin/venues')->group(function () {
+            Route::post('/', [VenueController::class, 'store']); // Create venue
+            Route::put('/{id}', [VenueController::class, 'update']); // Update venue
+            Route::delete('/{id}', [VenueController::class, 'destroy']); // Delete venue
+        });
     });
 
     // Customer only routes
