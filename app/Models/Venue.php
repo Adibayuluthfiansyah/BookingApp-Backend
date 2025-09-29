@@ -1,5 +1,4 @@
 <?php
-// app/Models/Venue.php
 
 namespace App\Models;
 
@@ -12,51 +11,43 @@ class Venue extends Model
 
     protected $fillable = [
         'name',
+        'slug',
         'description',
         'address',
-        'phone',
-        'price_per_hour',
-        'image',
-        'facilities',
-        'status',
+        'city',
+        'province',
         'latitude',
-        'longitude'
+        'longitude',
+        'image_url',
+        'facebook_url',
+        'instagram_url',
     ];
 
     protected $casts = [
-        'facilities' => 'array',
-        'price_per_hour' => 'decimal:2',
         'latitude' => 'decimal:8',
-        'longitude' => 'decimal:8'
+        'longitude' => 'decimal:8',
     ];
 
-    // Relationship dengan fields
+    // Relationships
     public function fields()
     {
         return $this->hasMany(Field::class);
     }
 
-    // Relationship dengan bookings
-    // public function bookings()
-    // {
-    //     return $this->hasManyThrough(Booking::class, Field::class);
-    // }
-
-
-
-    // Accessor untuk format price
-    public function getFormattedPriceAttribute()
+    public function facilities()
     {
-        return 'Rp ' . number_format($this->price_per_hour, 0, ',', '.');
+        return $this->belongsToMany(Facility::class, 'venue_facilities')
+            ->withTimestamps();
     }
 
-
-    // Accessor untuk image URL
-    public function getImageUrlAttribute()
+    public function images()
     {
-        if ($this->image) {
-            return asset('storage/' . $this->image);
-        }
-        return asset('images/default-venue.jpg');
+        return $this->hasMany(VenueImage::class)->orderBy('display_order');
+    }
+
+    // Helper methods
+    public function getRouteKeyName()
+    {
+        return 'slug';
     }
 }

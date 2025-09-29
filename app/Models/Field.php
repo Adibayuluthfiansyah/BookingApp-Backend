@@ -12,51 +12,37 @@ class Field extends Model
     protected $fillable = [
         'venue_id',
         'name',
-        'type',
-        'price_per_hour',
-        'description'
+        'field_type',
+        'description',
     ];
 
-    protected $casts = [
-        'price_per_hour' => 'decimal:2'
-    ];
-
-    // Relationship dengan venue
+    // Relationships
     public function venue()
     {
         return $this->belongsTo(Venue::class);
     }
 
-    // Relationship dengan bookings
-    // public function bookings()
-    // {
-    //     return $this->hasMany(Booking::class);
-    // }
-
-
-    // Scope berdasarkan type
-    public function scopeType($query, $type)
+    public function timeSlots()
     {
-        return $query->where('type', $type);
+        return $this->hasMany(TimeSlot::class);
     }
 
-    // Accessor untuk price (use venue price if field price is null)
-    public function getPriceAttribute()
+    public function bookings()
     {
-        return $this->price_per_hour ?? $this->venue->price_per_hour;
+        return $this->hasMany(Booking::class);
     }
 
-    // Accessor untuk formatted price
-    public function getFormattedPriceAttribute()
+    // Helper methods
+    public function getAvailableSlots($date)
     {
-        return 'Rp ' . number_format($this->price, 0, ',', '.');
-    }
+        $bookedSlots = $this->bookings()
+            ->where('booking_date', $date)
+            ->whereIn('status', ['pending', 'confirmed'])
+            ->pluck('start_time')
+            ->toArray();
 
-    // Method untuk check availability (placeholder untuk future booking system)
-    public function isAvailable($date, $startTime, $endTime)
-    {
-        // Logic untuk check booking availability
-        // Untuk sekarang return true
-        return true;
+        return $this->timeSlots()
+            ->whereNotIn('start_time', $bookedSlots)
+            ->get();
     }
 }
