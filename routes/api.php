@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AuthController;
 
 // Public routes
 Route::post('/login', [AuthController::class, 'login']);
+Route::post('/register', [AuthController::class, 'register']);
 
 // Protected routes (butuh authentication)
 Route::middleware('auth:sanctum')->group(function () {

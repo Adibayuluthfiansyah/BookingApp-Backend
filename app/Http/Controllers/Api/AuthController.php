@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\Validator;
 
 class AuthController extends Controller
 {
@@ -80,6 +81,43 @@ class AuthController extends Controller
             ]
         ], 200);
     }
+
+    //Register Function
+    public function register(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'name' => 'required|string|max:255',
+            'email' => 'required|string|email|max:255|unique:users',
+            'phone' => 'required|string|max:15',
+            'password' => 'required|string|min:8|confirmed',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $user = User::create([
+            'name' => $request->name,
+            'email' => $request->email,
+            'phone' => $request->phone,
+            'password' => Hash::make($request->password),
+        ]);
+
+        $token = $user->createToken('authToken')->plainTextToken;
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Registrasi berhasil',
+            'data' => [
+                'user' => $user,
+                'token' => $token
+            ]
+        ]);
+    }
+
 
     /**
      * Refresh token
