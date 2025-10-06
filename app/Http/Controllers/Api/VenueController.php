@@ -13,8 +13,9 @@ class VenueController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = Venue::with(['fields' => function ($query) {
+            // jika field punya kolom status, biarkan baris ini
             $query->where('status', 'active');
-        }, 'facilities', 'images'])->where('status', 'active');
+        }, 'facilities', 'images']);
 
         if ($request->has('search') && !empty($request->search)) {
             $search = $request->search;
