@@ -8,14 +8,14 @@ use App\Http\Controllers\Api\AuthController;
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
 
-//Venue Routes
-Route::get('/venues', [VenueController::class, 'index']);
-Route::post('/venues', [VenueController::class, 'store']);
-Route::get('/venues/{id}', [VenueController::class, 'show']);
-Route::put('/venues/{id}', [VenueController::class, 'update']);
-Route::delete('/venues/{id}', [VenueController::class, 'destroy']);
-// routes/api.php
-Route::get('/venues/{venue}', [VenueController::class, 'show']); // Akan otomatis support ID
+
+// Venue Routes
+Route::prefix('venues')->group(function () {
+    Route::get('/', [VenueController::class, 'index']);              // GET /api/venues
+    Route::get('/{id}', [VenueController::class, 'show']);           // GET /api/venues/{id}
+    Route::get('/{id}/available-slots', [VenueController::class, 'getAvailableSlots']); // GET /api/venues/{id}/available-slots
+});
+
 
 // Protected routes (butuh authentication)
 Route::middleware('auth:sanctum')->group(function () {
@@ -24,15 +24,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/refresh', [AuthController::class, 'refresh']);
 
-
     // Venues Routes
     // Route::prefix('venues')->group(function () {
     //     Route::get('/', [VenueController::class, 'index']);      // GET /api/venues
     //     Route::get('/{id}', [VenueController::class, 'show']);   // GET /api/venues/{id}
     //     Route::get('/{id}/schedule', [VenueController::class, 'schedule']); // GET /api/venues/{id}/schedule
     // });
-
-
 
     // Admin only routes
     Route::middleware('role:admin')->prefix('admin')->group(function () {
