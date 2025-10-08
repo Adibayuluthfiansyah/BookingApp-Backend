@@ -47,15 +47,13 @@ class VenueSeeder extends Seeder
         $field1 = Field::create([
             'venue_id' => $venue1->id,
             'name' => 'Lapangan A',
-            'field_type' => 'futsal',
-            'surface_type' => 'vinyl',
+            'field_type' => 'futsal'
         ]);
 
         $field2 = Field::create([
             'venue_id' => $venue1->id,
             'name' => 'Lapangan B',
-            'field_type' => 'futsal',
-            'surface_type' => 'vinyl',
+            'field_type' => 'futsal'
         ]);
 
         // Create time slots for field 1
@@ -123,8 +121,7 @@ class VenueSeeder extends Seeder
         $field3 = Field::create([
             'venue_id' => $venue2->id,
             'name' => 'Lapangan 1',
-            'field_type' => 'futsal',
-            'surface_type' => 'parquette',
+            'field_type' => 'futsal'
         ]);
 
         $this->createTimeSlots($field3->id, [
@@ -169,8 +166,7 @@ class VenueSeeder extends Seeder
         $field4 = Field::create([
             'venue_id' => $venue3->id,
             'name' => 'Lapangan Utama',
-            'field_type' => 'minisoccer',
-            'surface_type' => 'artificial_grass',
+            'field_type' => 'minisoccer'
         ]);
 
         $this->createTimeSlots($field4->id, [
