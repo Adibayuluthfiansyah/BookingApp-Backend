@@ -12,6 +12,7 @@ return new class extends Migration
             $table->id();
             $table->string('booking_number', 50)->unique();
             $table->foreignId('field_id')->constrained()->onDelete('restrict');
+            $table->foreignId('time_slot_id');
             $table->foreignId('user_id')->nullable()->constrained()->onDelete('set null');
             $table->date('booking_date');
             $table->time('start_time');
