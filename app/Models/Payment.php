@@ -15,6 +15,7 @@ class Payment extends Model
         'amount',
         'payment_proof',
         'payment_status',
+        'snap_token',
         'paid_at',
         'verified_at',
         'verified_by',

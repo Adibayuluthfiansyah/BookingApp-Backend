@@ -12,9 +12,9 @@ Route::post('/register', [AuthController::class, 'register']);
 
 // Venue Routes
 Route::prefix('venues')->group(function () {
-    Route::get('/', [VenueController::class, 'index']);              // GET /api/venues
-    Route::get('/{id}', [VenueController::class, 'show']);           // GET /api/venues/{id}
-    Route::get('/{id}/available-slots', [VenueController::class, 'getAvailableSlots']); // GET /api/venues/{id}/available-slots
+    Route::get('/', [VenueController::class, 'index']);
+    Route::get('/{id}', [VenueController::class, 'show']);
+    Route::get('/{id}/available-slots', [VenueController::class, 'getAvailableSlots']);
 });
 
 // Booking Routes
@@ -25,13 +25,12 @@ Route::get('/bookings/{bookingNumber}/status', [BookingController::class, 'getBo
 
 // Protected routes (butuh authentication)
 Route::middleware('auth:sanctum')->group(function () {
-    // Auth routes
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/refresh', [AuthController::class, 'refresh']);
 
 
-    // Admin only routes
+    // Admin routes
     Route::middleware('role:admin')->prefix('admin')->group(function () {
         Route::get('/dashboard', function () {
             return response()->json([
@@ -50,9 +49,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Admin routes untuk manage venues
         Route::prefix('admin/venues')->group(function () {
-            Route::post('/', [VenueController::class, 'store']); // Create venue
-            Route::put('/{id}', [VenueController::class, 'update']); // Update venue
-            Route::delete('/{id}', [VenueController::class, 'destroy']); // Delete venue
+            Route::post('/', [VenueController::class, 'store']);
+            Route::put('/{id}', [VenueController::class, 'update']);
+            Route::delete('/{id}', [VenueController::class, 'destroy']);
         });
     });
 
