@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\VenueController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BookingController;
 
 // Public routes
 Route::post('/login', [AuthController::class, 'login']);
@@ -15,6 +16,11 @@ Route::prefix('venues')->group(function () {
     Route::get('/{id}', [VenueController::class, 'show']);           // GET /api/venues/{id}
     Route::get('/{id}/available-slots', [VenueController::class, 'getAvailableSlots']); // GET /api/venues/{id}/available-slots
 });
+
+// Booking Routes
+Route::post('/bookings', [BookingController::class, 'createBooking']);
+Route::post('/bookings/callback', [BookingController::class, 'handleCallback']);
+Route::get('/bookings/{bookingNumber}/status', [BookingController::class, 'getBookingStatus']);
 
 
 // Protected routes (butuh authentication)
