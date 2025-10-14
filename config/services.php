@@ -14,6 +14,10 @@ return [
     |
     */
 
+    'midtrans' => [
+        'verify_ssl' => false, // Development only!
+    ],
+
     'postmark' => [
         'token' => env('POSTMARK_TOKEN'),
     ],

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use Illuminate\Support\Facades\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\Booking;
 use App\Models\Payment;
@@ -22,6 +23,12 @@ class BookingController extends Controller
         Config::$isProduction = config('midtrans.is_production');
         Config::$isSanitized = config('midtrans.is_sanitized');
         Config::$is3ds = config('midtrans.is_3ds');
+
+        // Disable SSL verify for development (remove in production!)
+        Config::$curlOptions = [
+            CURLOPT_SSL_VERIFYHOST => 0,
+            CURLOPT_SSL_VERIFYPEER => 0,
+        ];
     }
 
     public function createBooking(Request $request)
@@ -63,7 +70,7 @@ class BookingController extends Controller
             $booking = Booking::create([
                 'field_id' => $validated['field_id'],
                 'time_slot_id' => $validated['time_slot_id'],
-                // 'user_id' => auth()->id(), // null if not logged in
+                'user_id' => Auth::check() ? Auth::id() : null,  // null if not logged in
                 'booking_date' => $validated['booking_date'],
                 'start_time' => $timeSlot->start_time,
                 'end_time' => $timeSlot->end_time,
@@ -216,6 +223,8 @@ class BookingController extends Controller
             ], 500);
         }
     }
+
+
 
     public function getBookingStatus($bookingNumber)
     {
