@@ -13,20 +13,24 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Midtrans\Config;
 use Midtrans\Snap;
-use Exception;
+
 
 class BookingController extends Controller
 {
     public function __construct()
     {
-        // Set Midtrans configuration
+        Log::info('Midtrans Config Loaded', [
+            'server_key' => config('midtrans.server_key'),
+            'is_production' => config('midtrans.is_production'),
+        ]);
+
         Config::$serverKey = config('midtrans.server_key');
         Config::$isProduction = config('midtrans.is_production');
-        Config::$isSanitized = config('midtrans.is_sanitized');
         Config::$is3ds = config('midtrans.is_3ds');
+        Config::$isSanitized = true;
 
-        // PENTING: Hapus ini di production!
-        // Hanya untuk development/testing
+        Log::info('Midtrans Server Key: ' . Config::$serverKey);
+
         Config::$curlOptions = [
             CURLOPT_SSL_VERIFYHOST => 0,
             CURLOPT_SSL_VERIFYPEER => 0,
@@ -52,16 +56,28 @@ class BookingController extends Controller
 
             Log::info('Validation passed');
 
-            // Get time slot
-            $timeSlot = TimeSlot::find($validated['time_slot_id']);
-            if (!$timeSlot) {
+            // Get time slot - DENGAN BETTER ERROR HANDLING
+            try {
+                $timeSlot = TimeSlot::findOrFail($validated['time_slot_id']);
+
+                Log::info('Time slot found:', [
+                    'id' => $timeSlot->id,
+                    'price' => $timeSlot->price,
+                    'start_time' => $timeSlot->start_time,
+                    'end_time' => $timeSlot->end_time
+                ]);
+            } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+                Log::error('Time slot not found in database:', [
+                    'requested_id' => $validated['time_slot_id'],
+                    'error' => $e->getMessage(),
+                    'available_time_slots' => DB::table('time_slots')->pluck('id')->toArray()
+                ]);
+
                 return response()->json([
                     'success' => false,
-                    'message' => 'Time slot tidak ditemukan',
+                    'message' => 'Time slot dengan ID ' . $validated['time_slot_id'] . ' tidak ditemukan di database. Silakan pilih slot yang tersedia.',
                 ], 404);
             }
-
-            Log::info('Time slot found:', ['id' => $timeSlot->id, 'price' => $timeSlot->price]);
 
             // Check if slot is available
             $existingBooking = Booking::where('field_id', $validated['field_id'])
@@ -128,20 +144,18 @@ class BookingController extends Controller
             $orderID = $booking->booking_number;
             $grossAmount = (int) $totalAmount;
 
-            // Clean phone number - hapus karakter non-numeric
-            $cleanPhone = preg_replace('/[^0-9]/', '', $validated['customer_phone']);
+            // Clean and format phone number - IMPROVED
+            $cleanPhone = $this->cleanPhoneNumber($validated['customer_phone']);
 
-            // Format phone: pastikan dimulai dengan +62 atau 62
-            if (substr($cleanPhone, 0, 1) === '0') {
-                $cleanPhone = '62' . substr($cleanPhone, 1);
-            } elseif (substr($cleanPhone, 0, 2) !== '62') {
-                $cleanPhone = '62' . $cleanPhone;
-            }
+            // Sanitize strings untuk Midtrans - IMPROVED
+            $itemName = $this->sanitizeItemName($field->venue->name, $field->name);
+            $customerName = $this->sanitizeCustomerName($validated['customer_name']);
 
-            // Sanitize strings untuk Midtrans
-            $venueName = $this->sanitizeString($field->venue->name, 50);
-            $fieldName = $this->sanitizeString($field->name, 30);
-            $customerName = $this->sanitizeString($validated['customer_name'], 50);
+            Log::info('Sanitized data:', [
+                'item_name' => $itemName,
+                'customer_name' => $customerName,
+                'phone' => $cleanPhone
+            ]);
 
             $params = [
                 'transaction_details' => [
@@ -150,13 +164,13 @@ class BookingController extends Controller
                 ],
                 'item_details' => [
                     [
-                        'id' => 'BOOK' . $booking->id,
+                        'id' => 'FIELD_BOOKING_' . $booking->id,
                         'price' => (int) $subtotal,
                         'quantity' => 1,
-                        'name' => trim($venueName . ' - ' . $fieldName),
+                        'name' => $itemName,
                     ],
                     [
-                        'id' => 'ADMIN',
+                        'id' => 'ADMIN_FEE_' . $booking->id,
                         'price' => (int) $adminFee,
                         'quantity' => 1,
                         'name' => 'Biaya Admin',
@@ -171,48 +185,25 @@ class BookingController extends Controller
 
             Log::info('Midtrans params prepared:', $params);
 
-            // Get Snap Token dengan error handling yang lebih baik
+            // Get Snap Token dengan error handling
             try {
                 Log::info('Calling Midtrans Snap API...');
-                Log::info('Server Key: ' . substr(Config::$serverKey, 0, 20) . '...');
-                Log::info('Is Production: ' . (Config::$isProduction ? 'true' : 'false'));
 
                 $snapToken = Snap::getSnapToken($params);
 
                 Log::info('Snap token received successfully');
-                Log::info('Token preview: ' . substr($snapToken, 0, 30) . '...');
-            } catch (\Midtrans\Exceptions\ApiException $e) {
-                DB::rollBack();
-
-                Log::error('Midtrans API Exception:', [
-                    'message' => $e->getMessage(),
-                    'http_code' => $e->getHttpCode(),
-                    'response_body' => $e->getResponseBody(),
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine(),
-                ]);
-
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Gagal terhubung ke Midtrans: ' . $e->getMessage(),
-                    'details' => config('app.debug') ? [
-                        'http_code' => $e->getHttpCode(),
-                        'response' => $e->getResponseBody()
-                    ] : null
-                ], 500);
             } catch (\Exception $e) {
                 DB::rollBack();
 
-                Log::error('Midtrans General Error:', [
+                Log::error('Midtrans Snap Error:', [
                     'message' => $e->getMessage(),
                     'file' => $e->getFile(),
                     'line' => $e->getLine(),
-                    'trace' => $e->getTraceAsString()
                 ]);
 
                 return response()->json([
                     'success' => false,
-                    'message' => 'Terjadi kesalahan saat membuat pembayaran: ' . $e->getMessage(),
+                    'message' => 'Gagal membuat pembayaran: ' . $e->getMessage(),
                 ], 500);
             }
 
@@ -251,7 +242,6 @@ class BookingController extends Controller
                 'message' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
-                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
@@ -262,20 +252,93 @@ class BookingController extends Controller
     }
 
     /**
-     * Sanitize string untuk Midtrans
-     * Hapus karakter special, hanya izinkan alphanumeric dan spasi
+     * Clean dan format phone number untuk Midtrans
      */
-    private function sanitizeString($string, $maxLength = 50)
+    private function cleanPhoneNumber($phone)
     {
-        // Hapus karakter special, hanya izinkan huruf, angka, dan spasi
-        $clean = preg_replace('/[^a-zA-Z0-9 ]/', '', $string);
+        // Hapus semua karakter non-numeric
+        $clean = preg_replace('/[^0-9]/', '', $phone);
 
-        // Trim dan batasi panjang
+        // Jika kosong setelah cleaning, return default
+        if (empty($clean)) {
+            return '628000000000';
+        }
+
+        // Hilangkan leading zeros
+        $clean = ltrim($clean, '0');
+
+        // Tambahkan country code jika belum ada
+        if (substr($clean, 0, 2) !== '62') {
+            $clean = '62' . $clean;
+        }
+
+        // Validasi panjang (min 10 digit setelah 62, max 15)
+        $phoneLength = strlen($clean);
+        if ($phoneLength < 10 || $phoneLength > 15) {
+            // Return default jika tidak valid
+            return '628000000000';
+        }
+
+        return $clean;
+    }
+
+    /**
+     * Sanitize item name untuk Midtrans (venue + field)
+     * Max 50 karakter, hanya alphanumeric dan spasi
+     */
+    private function sanitizeItemName($venueName, $fieldName)
+    {
+        // Gabungkan venue dan field
+        $combined = $venueName . ' - ' . $fieldName;
+
+        // Hapus karakter special, hanya izinkan huruf, angka, spasi, dan dash
+        $clean = preg_replace('/[^a-zA-Z0-9 \-]/', '', $combined);
+
+        // Hapus multiple spaces
+        $clean = preg_replace('/\s+/', ' ', $clean);
+
+        // Trim
         $clean = trim($clean);
-        $clean = substr($clean, 0, $maxLength);
+
+        // Batasi panjang max 50 karakter
+        if (strlen($clean) > 50) {
+            $clean = substr($clean, 0, 47) . '...';
+        }
 
         // Jika kosong setelah sanitize, berikan default
-        return !empty($clean) ? $clean : 'Item';
+        if (empty($clean)) {
+            return 'Booking Lapangan';
+        }
+
+        return $clean;
+    }
+
+    /**
+     * Sanitize customer name untuk Midtrans
+     * Max 50 karakter, hanya alphanumeric dan spasi
+     */
+    private function sanitizeCustomerName($name)
+    {
+        // Hapus karakter special, hanya izinkan huruf, angka, dan spasi
+        $clean = preg_replace('/[^a-zA-Z0-9 ]/', '', $name);
+
+        // Hapus multiple spaces
+        $clean = preg_replace('/\s+/', ' ', $clean);
+
+        // Trim
+        $clean = trim($clean);
+
+        // Batasi panjang max 50 karakter
+        if (strlen($clean) > 50) {
+            $clean = substr($clean, 0, 50);
+        }
+
+        // Jika kosong setelah sanitize, berikan default
+        if (empty($clean)) {
+            return 'Customer';
+        }
+
+        return $clean;
     }
 
     public function handleCallback(Request $request)
@@ -350,7 +413,6 @@ class BookingController extends Controller
             Log::error('Midtrans callback error', [
                 'error' => $e->getMessage(),
                 'request' => $request->all(),
-                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([

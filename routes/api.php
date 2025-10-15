@@ -22,6 +22,29 @@ Route::post('/bookings', [BookingController::class, 'createBooking']);
 Route::post('/bookings/callback', [BookingController::class, 'handleCallback']);
 Route::get('/bookings/{bookingNumber}/status', [BookingController::class, 'getBookingStatus']);
 
+// Validate time slot endpoint
+Route::get('/time-slots/{id}/validate', function ($id) {
+    $timeSlot = \App\Models\TimeSlot::with('field')->find($id);
+
+    if (!$timeSlot) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Time slot dengan ID ' . $id . ' tidak ditemukan'
+        ], 404);
+    }
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Time slot valid',
+        'data' => [
+            'id' => $timeSlot->id,
+            'start_time' => $timeSlot->start_time,
+            'end_time' => $timeSlot->end_time,
+            'price' => $timeSlot->price,
+            'field_id' => $timeSlot->field_id,
+        ]
+    ]);
+});
 
 // Protected routes (butuh authentication)
 Route::middleware('auth:sanctum')->group(function () {
