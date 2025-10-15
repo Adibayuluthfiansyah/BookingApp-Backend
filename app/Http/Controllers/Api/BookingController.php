@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Midtrans\Config;
 use Midtrans\Snap;
+use Exception;
 
 class BookingController extends Controller
 {
@@ -24,7 +25,8 @@ class BookingController extends Controller
         Config::$isSanitized = config('midtrans.is_sanitized');
         Config::$is3ds = config('midtrans.is_3ds');
 
-        // Disable SSL verify for development (remove in production!)
+        // PENTING: Hapus ini di production!
+        // Hanya untuk development/testing
         Config::$curlOptions = [
             CURLOPT_SSL_VERIFYHOST => 0,
             CURLOPT_SSL_VERIFYPEER => 0,
@@ -34,6 +36,10 @@ class BookingController extends Controller
     public function createBooking(Request $request)
     {
         try {
+            Log::info('=== BOOKING REQUEST START ===');
+            Log::info('Request data:', $request->all());
+
+            // Validasi input
             $validated = $request->validate([
                 'field_id' => 'required|exists:fields,id',
                 'time_slot_id' => 'required|exists:time_slots,id',
@@ -43,6 +49,19 @@ class BookingController extends Controller
                 'customer_email' => 'required|email|max:255',
                 'notes' => 'nullable|string',
             ]);
+
+            Log::info('Validation passed');
+
+            // Get time slot
+            $timeSlot = TimeSlot::find($validated['time_slot_id']);
+            if (!$timeSlot) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Time slot tidak ditemukan',
+                ], 404);
+            }
+
+            Log::info('Time slot found:', ['id' => $timeSlot->id, 'price' => $timeSlot->price]);
 
             // Check if slot is available
             $existingBooking = Booking::where('field_id', $validated['field_id'])
@@ -54,15 +73,20 @@ class BookingController extends Controller
             if ($existingBooking) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Slot sudah dibooking, silakan pilih slot lain',
+                    'message' => 'Slot sudah dibooking',
                 ], 422);
             }
 
-            // Get time slot and calculate price
-            $timeSlot = TimeSlot::findOrFail($validated['time_slot_id']);
-            $subtotal = $timeSlot->price;
-            $adminFee = 5000; // Rp 5.000
+            // Calculate price
+            $subtotal = (float) $timeSlot->price;
+            $adminFee = 5000;
             $totalAmount = $subtotal + $adminFee;
+
+            Log::info('Price calculated:', [
+                'subtotal' => $subtotal,
+                'admin_fee' => $adminFee,
+                'total' => $totalAmount
+            ]);
 
             DB::beginTransaction();
 
@@ -70,7 +94,7 @@ class BookingController extends Controller
             $booking = Booking::create([
                 'field_id' => $validated['field_id'],
                 'time_slot_id' => $validated['time_slot_id'],
-                'user_id' => Auth::check() ? Auth::id() : null,  // null if not logged in
+                'user_id' => Auth::check() ? Auth::id() : null,
                 'booking_date' => $validated['booking_date'],
                 'start_time' => $timeSlot->start_time,
                 'end_time' => $timeSlot->end_time,
@@ -84,45 +108,113 @@ class BookingController extends Controller
                 'status' => 'pending',
             ]);
 
-            // Create Midtrans transaction
+            Log::info('Booking created:', ['id' => $booking->id, 'number' => $booking->booking_number]);
+
+            // Get field with venue
             $field = Field::with('venue')->find($validated['field_id']);
 
-            $transactionDetails = [
-                'order_id' => $booking->booking_number,
-                'gross_amount' => (int) $totalAmount,
-            ];
+            if (!$field || !$field->venue) {
+                DB::rollBack();
+                throw new \Exception('Field atau venue tidak ditemukan');
+            }
 
-            $itemDetails = [
-                [
-                    'id' => 'booking-' . $booking->id,
-                    'price' => (int) $subtotal,
-                    'quantity' => 1,
-                    'name' => "{$field->venue->name} - {$field->name}",
-                ],
-                [
-                    'id' => 'admin-fee',
-                    'price' => (int) $adminFee,
-                    'quantity' => 1,
-                    'name' => 'Biaya Admin',
-                ],
-            ];
+            Log::info('Field and venue found:', [
+                'field_id' => $field->id,
+                'field_name' => $field->name,
+                'venue_name' => $field->venue->name
+            ]);
 
-            $customerDetails = [
-                'first_name' => $validated['customer_name'],
-                'email' => $validated['customer_email'],
-                'phone' => $validated['customer_phone'],
-            ];
+            // Prepare Midtrans params
+            $orderID = $booking->booking_number;
+            $grossAmount = (int) $totalAmount;
+
+            // Clean phone number - hapus karakter non-numeric
+            $cleanPhone = preg_replace('/[^0-9]/', '', $validated['customer_phone']);
+
+            // Format phone: pastikan dimulai dengan +62 atau 62
+            if (substr($cleanPhone, 0, 1) === '0') {
+                $cleanPhone = '62' . substr($cleanPhone, 1);
+            } elseif (substr($cleanPhone, 0, 2) !== '62') {
+                $cleanPhone = '62' . $cleanPhone;
+            }
+
+            // Sanitize strings untuk Midtrans
+            $venueName = $this->sanitizeString($field->venue->name, 50);
+            $fieldName = $this->sanitizeString($field->name, 30);
+            $customerName = $this->sanitizeString($validated['customer_name'], 50);
 
             $params = [
-                'transaction_details' => $transactionDetails,
-                'item_details' => $itemDetails,
-                'customer_details' => $customerDetails,
-                'callbacks' => [
-                    'finish' => env('FRONTEND_URL') . '/booking/success?order_id=' . $booking->booking_number,
+                'transaction_details' => [
+                    'order_id' => $orderID,
+                    'gross_amount' => $grossAmount,
+                ],
+                'item_details' => [
+                    [
+                        'id' => 'BOOK' . $booking->id,
+                        'price' => (int) $subtotal,
+                        'quantity' => 1,
+                        'name' => trim($venueName . ' - ' . $fieldName),
+                    ],
+                    [
+                        'id' => 'ADMIN',
+                        'price' => (int) $adminFee,
+                        'quantity' => 1,
+                        'name' => 'Biaya Admin',
+                    ],
+                ],
+                'customer_details' => [
+                    'first_name' => $customerName,
+                    'email' => $validated['customer_email'],
+                    'phone' => $cleanPhone,
                 ],
             ];
 
-            $snapToken = Snap::getSnapToken($params);
+            Log::info('Midtrans params prepared:', $params);
+
+            // Get Snap Token dengan error handling yang lebih baik
+            try {
+                Log::info('Calling Midtrans Snap API...');
+                Log::info('Server Key: ' . substr(Config::$serverKey, 0, 20) . '...');
+                Log::info('Is Production: ' . (Config::$isProduction ? 'true' : 'false'));
+
+                $snapToken = Snap::getSnapToken($params);
+
+                Log::info('Snap token received successfully');
+                Log::info('Token preview: ' . substr($snapToken, 0, 30) . '...');
+            } catch (\Midtrans\Exceptions\ApiException $e) {
+                DB::rollBack();
+
+                Log::error('Midtrans API Exception:', [
+                    'message' => $e->getMessage(),
+                    'http_code' => $e->getHttpCode(),
+                    'response_body' => $e->getResponseBody(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Gagal terhubung ke Midtrans: ' . $e->getMessage(),
+                    'details' => config('app.debug') ? [
+                        'http_code' => $e->getHttpCode(),
+                        'response' => $e->getResponseBody()
+                    ] : null
+                ], 500);
+            } catch (\Exception $e) {
+                DB::rollBack();
+
+                Log::error('Midtrans General Error:', [
+                    'message' => $e->getMessage(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Terjadi kesalahan saat membuat pembayaran: ' . $e->getMessage(),
+                ], 500);
+            }
 
             // Create payment record
             Payment::create([
@@ -135,6 +227,8 @@ class BookingController extends Controller
 
             DB::commit();
 
+            Log::info('=== BOOKING CREATED SUCCESSFULLY ===');
+
             return response()->json([
                 'success' => true,
                 'message' => 'Booking berhasil dibuat',
@@ -144,6 +238,7 @@ class BookingController extends Controller
                 ],
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
+            Log::error('Validation error:', $e->errors());
             return response()->json([
                 'success' => false,
                 'message' => 'Validasi gagal',
@@ -151,9 +246,12 @@ class BookingController extends Controller
             ], 422);
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Booking creation error', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+
+            Log::error('=== BOOKING ERROR ===', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
@@ -163,9 +261,28 @@ class BookingController extends Controller
         }
     }
 
+    /**
+     * Sanitize string untuk Midtrans
+     * Hapus karakter special, hanya izinkan alphanumeric dan spasi
+     */
+    private function sanitizeString($string, $maxLength = 50)
+    {
+        // Hapus karakter special, hanya izinkan huruf, angka, dan spasi
+        $clean = preg_replace('/[^a-zA-Z0-9 ]/', '', $string);
+
+        // Trim dan batasi panjang
+        $clean = trim($clean);
+        $clean = substr($clean, 0, $maxLength);
+
+        // Jika kosong setelah sanitize, berikan default
+        return !empty($clean) ? $clean : 'Item';
+    }
+
     public function handleCallback(Request $request)
     {
         try {
+            Log::info('=== MIDTRANS CALLBACK RECEIVED ===', $request->all());
+
             $orderID = $request->order_id;
             $statusCode = $request->status_code;
             $grossAmount = $request->gross_amount;
@@ -176,6 +293,12 @@ class BookingController extends Controller
             $hash = hash('sha512', $orderID . $statusCode . $grossAmount . $serverKey);
 
             if ($hash !== $signatureKey) {
+                Log::warning('Invalid signature from Midtrans', [
+                    'order_id' => $orderID,
+                    'expected' => $hash,
+                    'received' => $signatureKey
+                ]);
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Invalid signature',
@@ -188,6 +311,13 @@ class BookingController extends Controller
             $transactionStatus = $request->transaction_status;
             $fraudStatus = $request->fraud_status ?? null;
 
+            Log::info('Processing callback', [
+                'order_id' => $orderID,
+                'transaction_status' => $transactionStatus,
+                'fraud_status' => $fraudStatus
+            ]);
+
+            // Update status berdasarkan response Midtrans
             if ($transactionStatus == 'capture') {
                 if ($fraudStatus == 'accept') {
                     $booking->status = 'paid';
@@ -207,6 +337,11 @@ class BookingController extends Controller
             $booking->save();
             $payment->save();
 
+            Log::info('Callback processed successfully', [
+                'booking_status' => $booking->status,
+                'payment_status' => $payment->status
+            ]);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Callback processed',
@@ -215,6 +350,7 @@ class BookingController extends Controller
             Log::error('Midtrans callback error', [
                 'error' => $e->getMessage(),
                 'request' => $request->all(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
@@ -223,8 +359,6 @@ class BookingController extends Controller
             ], 500);
         }
     }
-
-
 
     public function getBookingStatus($bookingNumber)
     {
