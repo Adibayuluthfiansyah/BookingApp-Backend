@@ -18,8 +18,9 @@ Route::prefix('venues')->group(function () {
 });
 
 // Booking Routes
+// Booking routes
 Route::post('/bookings', [BookingController::class, 'createBooking']);
-Route::post('/bookings/callback', [BookingController::class, 'handleCallback']);
+Route::post('/midtrans/callback', [BookingController::class, 'handleCallback']);
 Route::get('/bookings/{bookingNumber}/status', [BookingController::class, 'getBookingStatus']);
 
 // Validate time slot endpoint

@@ -14,6 +14,7 @@ return new class extends Migration
             $table->enum('payment_method', ['transfer_bank', 'cash', 'e-wallet']);
             $table->decimal('amount', 10, 2);
             $table->string('payment_proof', 500)->nullable();
+            $table->string('snap_token', 500)->nullable();
             $table->enum('payment_status', ['pending', 'verified', 'rejected'])->default('pending');
             $table->timestamp('paid_at')->nullable();
             $table->timestamp('verified_at')->nullable();
