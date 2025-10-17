@@ -11,6 +11,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
+use App\Notifications\BookingConfirmedNotification;
+use Illuminate\Support\Facades\Notification;
 
 class BookingController extends Controller
 {
@@ -387,11 +389,17 @@ class BookingController extends Controller
                     $booking->status = 'confirmed';
                     $payment->payment_status = 'verified';
                     $payment->paid_at = now();
+
+                    // Send email notification
+                    $this->sendBookingConfirmation($booking);
                 }
             } elseif ($transactionStatus == 'settlement') {
                 $booking->status = 'confirmed';
                 $payment->payment_status = 'verified';
                 $payment->paid_at = now();
+
+                // Send email notification
+                $this->sendBookingConfirmation($booking);
             } elseif ($transactionStatus == 'pending') {
                 $booking->status = 'pending';
                 $payment->payment_status = 'pending';
@@ -444,6 +452,91 @@ class BookingController extends Controller
                 'success' => false,
                 'message' => 'Booking tidak ditemukan',
             ], 404);
+        }
+    }
+    /**
+     * Cancel booking
+     */
+    public function cancelBooking($bookingNumber)
+    {
+        try {
+            $booking = Booking::with('payment')
+                ->where('booking_number', $bookingNumber)
+                ->firstOrFail();
+
+            // Only allow cancellation for pending bookings
+            if ($booking->status !== 'pending') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Booking tidak dapat dibatalkan. Status: ' . $booking->status,
+                ], 422);
+            }
+
+            // Check if payment is still pending
+            if ($booking->payment && $booking->payment->payment_status === 'verified') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Booking tidak dapat dibatalkan karena sudah dibayar',
+                ], 422);
+            }
+
+            DB::beginTransaction();
+
+            // Update booking status
+            $booking->update(['status' => 'cancelled']);
+
+            // Update payment status if exists
+            if ($booking->payment) {
+                $booking->payment->update(['payment_status' => 'rejected']);
+            }
+
+            DB::commit();
+
+            Log::info('Booking cancelled', [
+                'booking_number' => $bookingNumber,
+                'cancelled_at' => now()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Booking berhasil dibatalkan',
+                'data' => $booking,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            Log::error('Cancel booking error', [
+                'booking_number' => $bookingNumber,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal membatalkan booking: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Send booking confirmation email
+     */
+    private function sendBookingConfirmation($booking)
+    {
+        try {
+            // Send email to customer
+            Notification::route('mail', $booking->customer_email)
+                ->notify(new BookingConfirmedNotification($booking));
+
+            Log::info('Booking confirmation email sent', [
+                'booking_number' => $booking->booking_number,
+                'email' => $booking->customer_email
+            ]);
+        } catch (\Exception $e) {
+            // Log error but don't fail the request
+            Log::error('Failed to send booking confirmation email', [
+                'booking_number' => $booking->booking_number,
+                'error' => $e->getMessage()
+            ]);
         }
     }
 }

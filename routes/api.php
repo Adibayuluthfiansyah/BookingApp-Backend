@@ -22,6 +22,7 @@ Route::prefix('venues')->group(function () {
 Route::post('/bookings', [BookingController::class, 'createBooking']);
 Route::post('/midtrans/callback', [BookingController::class, 'handleCallback']);
 Route::get('/bookings/{bookingNumber}/status', [BookingController::class, 'getBookingStatus']);
+Route::post('/bookings/{bookingNumber}/cancel', [BookingController::class, 'cancelBooking']);
 
 // Validate time slot endpoint
 Route::get('/time-slots/{id}/validate', function ($id) {
