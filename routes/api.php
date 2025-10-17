@@ -18,7 +18,6 @@ Route::prefix('venues')->group(function () {
 });
 
 // Booking Routes
-// Booking routes
 Route::post('/bookings', [BookingController::class, 'createBooking']);
 Route::post('/midtrans/callback', [BookingController::class, 'handleCallback']);
 Route::get('/bookings/{bookingNumber}/status', [BookingController::class, 'getBookingStatus']);
@@ -92,6 +91,14 @@ Route::middleware('auth:sanctum')->group(function () {
             ]);
         });
 
+        Route::get('/midtrans/test', function () {
+            return response()->json([
+                'success' => true,
+                'message' => 'Midtrans callback endpoint is reachable',
+                'timestamp' => now(),
+                'app_url' => config('app.url'),
+            ]);
+        });
         // Tambahkan route customer lainnya di sini
     });
 });
