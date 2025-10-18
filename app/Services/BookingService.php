@@ -114,34 +114,67 @@ class BookingService
     /**
      * Get dashboard statistics (optimized)
      */
+    /**
+     * Get dashboard statistics (FULLY OPTIMIZED)
+     */
     public function getDashboardStats()
     {
         $today = now()->format('Y-m-d');
         $thisMonth = now()->format('Y-m');
 
-        // Gunakan single query dengan aggregate functions
+        // 1. Single query untuk semua aggregate stats
         $stats = Booking::selectRaw("
-            COUNT(*) as total_bookings,
-            COUNT(CASE WHEN DATE(booking_date) = ? THEN 1 END) as today_bookings,
-            COUNT(CASE WHEN DATE_FORMAT(booking_date, '%Y-%m') = ? THEN 1 END) as monthly_bookings,
-            COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_bookings,
-            SUM(CASE WHEN status IN ('confirmed', 'completed') THEN total_amount ELSE 0 END) as total_revenue,
-            SUM(CASE WHEN DATE(booking_date) = ? AND status IN ('confirmed', 'completed') THEN total_amount ELSE 0 END) as today_revenue,
-            SUM(CASE WHEN DATE_FORMAT(booking_date, '%Y-%m') = ? AND status IN ('confirmed', 'completed') THEN total_amount ELSE 0 END) as monthly_revenue
-        ", [$today, $thisMonth, $today, $thisMonth])
+        COUNT(*) as total_bookings,
+        COUNT(CASE WHEN DATE(booking_date) = ? THEN 1 END) as today_bookings,
+        COUNT(CASE WHEN DATE_FORMAT(booking_date, '%Y-%m') = ? THEN 1 END) as monthly_bookings,
+        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_bookings,
+        SUM(CASE WHEN status IN ('confirmed', 'completed') THEN total_amount ELSE 0 END) as total_revenue,
+        SUM(CASE WHEN DATE(booking_date) = ? AND status IN ('confirmed', 'completed') THEN total_amount ELSE 0 END) as today_revenue,
+        SUM(CASE WHEN DATE_FORMAT(booking_date, '%Y-%m') = ? AND status IN ('confirmed', 'completed') THEN total_amount ELSE 0 END) as monthly_revenue
+    ", [$today, $thisMonth, $today, $thisMonth])
             ->first();
 
-        // Recent bookings dengan pagination
-        $recentBookings = Booking::with(['field.venue:id,name', 'payment:booking_id,payment_status'])
-            ->select('id', 'booking_number', 'field_id', 'customer_name', 'status', 'total_amount', 'created_at')
-            ->latest()
+        // 2. Recent bookings dengan JOIN untuk avoid N+1
+        $recentBookings = DB::table('bookings')
+            ->join('fields', 'bookings.field_id', '=', 'fields.id')
+            ->join('venues', 'fields.venue_id', '=', 'venues.id')
+            ->leftJoin('payments', 'bookings.id', '=', 'payments.booking_id')
+            ->select(
+                'bookings.id',
+                'bookings.booking_number',
+                'bookings.customer_name',
+                'bookings.status',
+                'bookings.total_amount',
+                'bookings.created_at',
+                'venues.name as venue_name',
+                'fields.name as field_name',
+                'payments.payment_status'
+            )
+            ->orderBy('bookings.created_at', 'desc')
             ->limit(10)
             ->get();
 
-        // Booking by status
+        // 3. Booking by status - single query
         $bookingsByStatus = Booking::selectRaw('status, count(*) as count')
             ->groupBy('status')
             ->pluck('count', 'status');
+
+        // 4. Revenue by venue - single query dengan JOIN
+        $revenueByVenue = DB::table('bookings')
+            ->join('fields', 'bookings.field_id', '=', 'fields.id')
+            ->join('venues', 'fields.venue_id', '=', 'venues.id')
+            ->where('bookings.status', 'confirmed')
+            ->orWhere('bookings.status', 'completed')
+            ->select(
+                'venues.id as venue_id',
+                'venues.name as venue_name',
+                DB::raw('SUM(bookings.total_amount) as revenue'),
+                DB::raw('COUNT(bookings.id) as booking_count')
+            )
+            ->groupBy('venues.id', 'venues.name')
+            ->orderByDesc('revenue')
+            ->limit(5)
+            ->get();
 
         return [
             'today' => [
@@ -159,6 +192,7 @@ class BookingService
             ],
             'recent_bookings' => $recentBookings,
             'bookings_by_status' => $bookingsByStatus,
+            'revenue_by_venue' => $revenueByVenue,
         ];
     }
 
