@@ -539,4 +539,269 @@ class BookingController extends Controller
             ]);
         }
     }
+
+    /**
+     * Get all bookings with filters (Admin only)
+     */
+    public function getAllBookings(Request $request)
+    {
+        try {
+            Log::info('Admin fetching all bookings', [
+                'filters' => $request->all()
+            ]);
+
+            $query = Booking::with(['field.venue', 'payment', 'user']);
+
+            // Filter by status
+            if ($request->has('status') && $request->status !== 'all') {
+                $query->where('status', $request->status);
+            }
+
+            // Filter by payment status
+            if ($request->has('payment_status') && $request->payment_status !== 'all') {
+                $query->whereHas('payment', function ($q) use ($request) {
+                    $q->where('payment_status', $request->payment_status);
+                });
+            }
+
+            // Filter by date range
+            if ($request->has('start_date') && $request->start_date) {
+                $query->where('booking_date', '>=', $request->start_date);
+            }
+            if ($request->has('end_date') && $request->end_date) {
+                $query->where('booking_date', '<=', $request->end_date);
+            }
+
+            // Filter by venue
+            if ($request->has('venue_id') && $request->venue_id) {
+                $query->whereHas('field', function ($q) use ($request) {
+                    $q->where('venue_id', $request->venue_id);
+                });
+            }
+
+            // Search by booking number or customer name
+            if ($request->has('search') && $request->search) {
+                $search = $request->search;
+                $query->where(function ($q) use ($search) {
+                    $q->where('booking_number', 'like', "%{$search}%")
+                        ->orWhere('customer_name', 'like', "%{$search}%")
+                        ->orWhere('customer_email', 'like', "%{$search}%")
+                        ->orWhere('customer_phone', 'like', "%{$search}%");
+                });
+            }
+
+            // Sort
+            $sortBy = $request->get('sort_by', 'created_at');
+            $sortOrder = $request->get('sort_order', 'desc');
+            $query->orderBy($sortBy, $sortOrder);
+
+            // Paginate
+            $perPage = $request->get('per_page', 20);
+            $bookings = $query->paginate($perPage);
+
+            Log::info('Bookings fetched', [
+                'total' => $bookings->total(),
+                'current_page' => $bookings->currentPage()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'data' => $bookings->items(),
+                'meta' => [
+                    'current_page' => $bookings->currentPage(),
+                    'last_page' => $bookings->lastPage(),
+                    'per_page' => $bookings->perPage(),
+                    'total' => $bookings->total(),
+                    'from' => $bookings->firstItem(),
+                    'to' => $bookings->lastItem(),
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching all bookings', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil data booking: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get booking detail (Admin)
+     */
+    public function getBookingDetail($id)
+    {
+        try {
+            $booking = Booking::with(['field.venue', 'payment', 'user'])
+                ->findOrFail($id);
+
+            Log::info('Admin viewing booking detail', [
+                'booking_id' => $id,
+                'admin_id' => auth()->id()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'data' => $booking
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching booking detail', [
+                'booking_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Booking tidak ditemukan'
+            ], 404);
+        }
+    }
+
+    /**
+     * Update booking status manually (Admin)
+     */
+    public function updateBookingStatus(Request $request, $id)
+    {
+        try {
+            $validated = $request->validate([
+                'status' => 'required|in:pending,confirmed,cancelled,completed',
+                'notes' => 'nullable|string'
+            ]);
+
+            $booking = Booking::with('payment')->findOrFail($id);
+            $oldStatus = $booking->status;
+
+            $booking->status = $validated['status'];
+            if (isset($validated['notes'])) {
+                $booking->notes = ($booking->notes ? $booking->notes . "\n" : '') .
+                    "[Admin Update] " . $validated['notes'];
+            }
+            $booking->save();
+
+            // Update payment status if needed
+            if ($validated['status'] === 'confirmed' && $booking->payment) {
+                $booking->payment->payment_status = 'verified';
+                $booking->payment->paid_at = $booking->payment->paid_at ?? now();
+                $booking->payment->save();
+            } elseif ($validated['status'] === 'cancelled' && $booking->payment) {
+                $booking->payment->payment_status = 'rejected';
+                $booking->payment->save();
+            }
+
+            Log::info('Booking status updated by admin', [
+                'booking_id' => $id,
+                'old_status' => $oldStatus,
+                'new_status' => $validated['status'],
+                'admin_id' => auth()->id()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Status booking berhasil diupdate',
+                'data' => $booking->fresh(['field.venue', 'payment'])
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data tidak valid',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Error updating booking status', [
+                'booking_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengupdate status booking: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get dashboard statistics (Admin)
+     */
+    public function getDashboardStats()
+    {
+        try {
+            $today = now()->format('Y-m-d');
+            $thisMonth = now()->format('Y-m');
+
+            // Today's stats
+            $todayBookings = Booking::whereDate('booking_date', $today)->count();
+            $todayRevenue = Booking::whereDate('booking_date', $today)
+                ->whereIn('status', ['confirmed', 'completed'])
+                ->sum('total_amount');
+
+            // This month stats
+            $monthlyBookings = Booking::where('booking_date', 'like', "$thisMonth%")->count();
+            $monthlyRevenue = Booking::where('booking_date', 'like', "$thisMonth%")
+                ->whereIn('status', ['confirmed', 'completed'])
+                ->sum('total_amount');
+
+            // Overall stats
+            $totalBookings = Booking::count();
+            $totalRevenue = Booking::whereIn('status', ['confirmed', 'completed'])
+                ->sum('total_amount');
+
+            // Pending bookings
+            $pendingBookings = Booking::where('status', 'pending')->count();
+
+            // Recent bookings
+            $recentBookings = Booking::with(['field.venue', 'payment'])
+                ->orderBy('created_at', 'desc')
+                ->limit(10)
+                ->get();
+
+            // Booking by status
+            $bookingsByStatus = Booking::selectRaw('status, count(*) as count')
+                ->groupBy('status')
+                ->pluck('count', 'status');
+
+            // Revenue by venue
+            $revenueByVenue = Booking::selectRaw('venues.name as venue_name, sum(bookings.total_amount) as revenue')
+                ->join('fields', 'bookings.field_id', '=', 'fields.id')
+                ->join('venues', 'fields.venue_id', '=', 'venues.id')
+                ->whereIn('bookings.status', ['confirmed', 'completed'])
+                ->groupBy('venues.id', 'venues.name')
+                ->orderByDesc('revenue')
+                ->limit(5)
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'today' => [
+                        'bookings' => $todayBookings,
+                        'revenue' => $todayRevenue,
+                    ],
+                    'monthly' => [
+                        'bookings' => $monthlyBookings,
+                        'revenue' => $monthlyRevenue,
+                    ],
+                    'overall' => [
+                        'total_bookings' => $totalBookings,
+                        'total_revenue' => $totalRevenue,
+                        'pending_bookings' => $pendingBookings,
+                    ],
+                    'recent_bookings' => $recentBookings,
+                    'bookings_by_status' => $bookingsByStatus,
+                    'revenue_by_venue' => $revenueByVenue,
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching dashboard stats', [
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil statistik dashboard'
+            ], 500);
+        }
+    }
 }
