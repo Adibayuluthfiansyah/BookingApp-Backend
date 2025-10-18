@@ -13,15 +13,20 @@ use Illuminate\Support\Facades\Log;
 class VenueController extends Controller
 {
     /**
-     * Get all venues
+     * Get all venues (OPTIMIZED - tanpa time slots)
      */
     public function index(Request $request)
     {
         try {
-            $query = Venue::with(['fields.timeSlots', 'facilities', 'images']);
+            // Load fields tapi TANPA time slots untuk performa
+            $query = Venue::with([
+                'fields:id,venue_id,name,field_type,description',
+                'facilities',
+                'images'
+            ]);
 
             // Search
-            if ($request->has('search')) {
+            if ($request->filled('search')) {
                 $search = $request->search;
                 $query->where(function ($q) use ($search) {
                     $q->where('name', 'like', "%{$search}%")
@@ -31,29 +36,19 @@ class VenueController extends Controller
             }
 
             // City filter
-            if ($request->has('city')) {
+            if ($request->filled('city')) {
                 $query->where('address', 'like', "%{$request->city}%");
             }
 
             // Sort
-            if ($request->has('sort')) {
-                switch ($request->sort) {
-                    case 'price':
-                        // Sort by minimum price (requires subquery)
-                        break;
-                    case 'name':
-                        $query->orderBy('name', 'asc');
-                        break;
-                    default:
-                        $query->orderBy('created_at', 'desc');
-                }
+            $sortBy = $request->get('sort', 'created_at');
+            if ($sortBy === 'name') {
+                $query->orderBy('name', 'asc');
             } else {
                 $query->orderBy('created_at', 'desc');
             }
 
             $venues = $query->get();
-
-            Log::info('Venues fetched', ['count' => $venues->count()]);
 
             return response()->json([
                 'success' => true,
@@ -71,7 +66,7 @@ class VenueController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch venues: ' . $e->getMessage(),
+                'message' => 'Failed to fetch venues',
                 'data' => []
             ], 500);
         }
@@ -83,10 +78,12 @@ class VenueController extends Controller
     public function show($identifier)
     {
         try {
-            Log::info('Fetching venue', ['identifier' => $identifier]);
+            Log::info('Fetching venue detail', ['identifier' => $identifier]);
 
+            // Load fields dengan detail lengkap tapi TANPA time slots
+            // Time slots akan diload saat user pilih tanggal di available-slots endpoint
             $venue = Venue::with([
-                'fields.timeSlots',
+                'fields:id,venue_id,name,field_type,description',
                 'facilities',
                 'images'
             ])
@@ -95,16 +92,17 @@ class VenueController extends Controller
                 ->first();
 
             if (!$venue) {
-                Log::warning('Venue not found', ['identifier' => $identifier]);
-
                 return response()->json([
                     'success' => false,
                     'message' => 'Venue tidak ditemukan',
-                    'data' => null
                 ], 404);
             }
 
-            Log::info('Venue found', ['id' => $venue->id, 'name' => $venue->name]);
+            Log::info('Venue found', [
+                'id' => $venue->id,
+                'name' => $venue->name,
+                'fields_count' => $venue->fields->count()
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -120,45 +118,42 @@ class VenueController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal mengambil data venue: ' . $e->getMessage(),
-                'data' => null
+                'message' => 'Gagal mengambil data venue',
             ], 500);
         }
     }
 
     /**
-     * Get available time slots for a venue
-     */
-    /**
-     * Get time slots with booking status for a venue
+     * Get available slots (OPTIMIZED dengan index)
      */
     public function getAvailableSlots(Request $request, $venueId)
     {
         try {
-            Log::info('Getting slots with booking status', [
-                'venue_id' => $venueId,
-                'field_id' => $request->field_id,
-                'date' => $request->date
-            ]);
-
-            // Validate request
             $validated = $request->validate([
                 'field_id' => 'required|integer',
                 'date' => 'required|date_format:Y-m-d'
             ]);
 
-            // Check if venue exists
+            $fieldId = $validated['field_id'];
+            $date = $validated['date'];
+
+            Log::info('Getting available slots', [
+                'venue_id' => $venueId,
+                'field_id' => $fieldId,
+                'date' => $date
+            ]);
+
+            // Check venue exists
             $venue = Venue::find($venueId);
             if (!$venue) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Venue tidak ditemukan',
-                    'data' => []
                 ], 404);
             }
 
-            // Check if field exists and belongs to this venue
-            $field = Field::where('id', $validated['field_id'])
+            // Check field belongs to venue
+            $field = Field::where('id', $fieldId)
                 ->where('venue_id', $venueId)
                 ->first();
 
@@ -166,43 +161,39 @@ class VenueController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Lapangan tidak ditemukan',
-                    'data' => []
                 ], 404);
             }
 
-            $fieldId = $validated['field_id'];
-            $date = $validated['date'];
-
-            // Get all time slots for this field
+            // Get all time slots
             $allSlots = TimeSlot::where('field_id', $fieldId)
+                ->select('id', 'field_id', 'start_time', 'end_time', 'price')
                 ->orderBy('start_time', 'asc')
                 ->get();
 
             if ($allSlots->isEmpty()) {
                 return response()->json([
                     'success' => true,
-                    'message' => 'Tidak ada slot tersedia untuk lapangan ini',
+                    'message' => 'Tidak ada slot tersedia',
                     'data' => []
                 ]);
             }
 
-            // Get booked slots for this date with booking details
-            $bookedSlots = Booking::where('field_id', $fieldId)
+            // Get booked slots (OPTIMIZED dengan index)
+            $bookedSlotIds = Booking::where('field_id', $fieldId)
                 ->where('booking_date', $date)
-                ->whereIn('status', ['pending', 'confirmed', 'paid'])
-                ->with(['payment'])
-                ->get()
-                ->keyBy('time_slot_id');
+                ->whereIn('status', ['pending', 'confirmed', 'completed'])
+                ->pluck('time_slot_id')
+                ->toArray();
 
-            Log::info('Booked slots found', [
+            Log::info('Booked slots', [
                 'date' => $date,
-                'count' => $bookedSlots->count(),
-                'booked_ids' => $bookedSlots->keys()->toArray()
+                'booked_count' => count($bookedSlotIds),
+                'booked_ids' => $bookedSlotIds
             ]);
 
-            // Add booking status to each slot
-            $slotsWithStatus = $allSlots->map(function ($slot) use ($bookedSlots) {
-                $booking = $bookedSlots->get($slot->id);
+            // Map availability
+            $slotsWithStatus = $allSlots->map(function ($slot) use ($bookedSlotIds) {
+                $isBooked = in_array($slot->id, $bookedSlotIds);
 
                 return [
                     'id' => $slot->id,
@@ -210,14 +201,8 @@ class VenueController extends Controller
                     'start_time' => $slot->start_time,
                     'end_time' => $slot->end_time,
                     'price' => $slot->price,
-                    'is_available' => !$booking,
-                    'booking_status' => $booking ? 'booked' : 'available',
-                    'booking_info' => $booking ? [
-                        'booking_number' => $booking->booking_number,
-                        'customer_name' => $booking->customer_name,
-                        'status' => $booking->status,
-                        'payment_status' => $booking->payment?->payment_status ?? 'unknown'
-                    ] : null,
+                    'is_available' => !$isBooked,
+                    'booking_status' => $isBooked ? 'booked' : 'available',
                 ];
             });
 
@@ -232,12 +217,10 @@ class VenueController extends Controller
                 ]
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
-            Log::error('Validation error', ['errors' => $e->errors()]);
             return response()->json([
                 'success' => false,
                 'message' => 'Data tidak valid',
                 'errors' => $e->errors(),
-                'data' => []
             ], 422);
         } catch (\Exception $e) {
             Log::error('Error fetching slots', [
@@ -248,8 +231,7 @@ class VenueController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal mengambil slot jadwal: ' . $e->getMessage(),
-                'data' => []
+                'message' => 'Gagal mengambil slot jadwal',
             ], 500);
         }
     }
