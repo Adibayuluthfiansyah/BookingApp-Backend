@@ -41,6 +41,11 @@ class Booking extends Model
         return $this->belongsTo(Field::class);
     }
 
+    public function timeSlot()
+    {
+        return $this->belongsTo(TimeSlot::class, 'time_slot_id');
+    }
+
     public function user()
     {
         return $this->belongsTo(User::class);

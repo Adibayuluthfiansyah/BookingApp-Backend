@@ -55,24 +55,17 @@ Route::middleware('auth:sanctum')->group(function () {
 
 
     // Admin routes
-    Route::middleware('role:admin')->prefix('admin')->group(function () {
-        Route::get('/dashboard', function () {
-            return response()->json([
-                'success' => true,
-                'message' => 'Welcome to Admin Dashboard',
-                'data' => [
-                    'stats' => [
-                        'total_bookings' => 150,
-                        'total_customers' => 75,
-                        'total_fields' => 12,
-                        'revenue_today' => 2500000,
-                    ]
-                ]
-            ]);
-        });
+    Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
+        // Dashboard Stats
+        Route::get('/dashboard', [BookingController::class, 'getDashboardStats']);
 
-        // Admin routes untuk manage venues
-        Route::prefix('admin/venues')->group(function () {
+        // Bookings Management
+        Route::get('/bookings', [BookingController::class, 'getAllBookings']);
+        Route::get('/bookings/{id}', [BookingController::class, 'getBookingDetail']);
+        Route::patch('/bookings/{id}/status', [BookingController::class, 'updateBookingStatus']);
+
+        // Venues Management
+        Route::prefix('venues')->group(function () {
             Route::post('/', [VenueController::class, 'store']);
             Route::put('/{id}', [VenueController::class, 'update']);
             Route::delete('/{id}', [VenueController::class, 'destroy']);
@@ -91,6 +84,7 @@ Route::middleware('auth:sanctum')->group(function () {
             ]);
         });
 
+        //Midtrans routes for testing
         Route::get('/midtrans/test', function () {
             return response()->json([
                 'success' => true,

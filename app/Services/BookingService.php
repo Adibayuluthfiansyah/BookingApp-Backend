@@ -131,23 +131,27 @@ class BookingService
     ", [$today, $thisMonth, $today, $thisMonth])
             ->first();
 
-        // 2. Recent bookings
-        $recentBookings = DB::table('bookings')
-            ->join('fields', 'bookings.field_id', '=', 'fields.id')
-            ->join('venues', 'fields.venue_id', '=', 'venues.id')
-            ->leftJoin('payments', 'bookings.id', '=', 'payments.booking_id')
-            ->select(
-                'bookings.id',
-                'bookings.booking_number',
-                'bookings.customer_name',
-                'bookings.status',
-                'bookings.total_amount',
-                'bookings.created_at',
-                'venues.name as venue_name',
-                'fields.name as field_name',
-                'payments.payment_status'
-            )
-            ->orderBy('bookings.created_at', 'desc')
+        // 2. Recent bookings - MENGGUNAKAN ELOQUENT dengan eager loading
+        $recentBookings = Booking::with([
+            'field:id,venue_id,name',
+            'field.venue:id,name',
+            'payment:id,booking_id,payment_status,paid_at'
+        ])
+            ->select([
+                'id',
+                'booking_number',
+                'field_id',
+                'booking_date',
+                'start_time',
+                'end_time',
+                'customer_name',
+                'customer_phone',
+                'customer_email',
+                'status',
+                'total_amount',
+                'created_at'
+            ])
+            ->orderBy('created_at', 'desc')
             ->limit(10)
             ->get();
 
@@ -160,8 +164,7 @@ class BookingService
         $revenueByVenue = DB::table('bookings')
             ->join('fields', 'bookings.field_id', '=', 'fields.id')
             ->join('venues', 'fields.venue_id', '=', 'venues.id')
-            ->where('bookings.status', 'confirmed')
-            ->orWhere('bookings.status', 'completed')
+            ->whereIn('bookings.status', ['confirmed', 'completed']) // FIX: gunakan whereIn
             ->select(
                 'venues.id as venue_id',
                 'venues.name as venue_name',
