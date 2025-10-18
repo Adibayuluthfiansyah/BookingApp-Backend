@@ -112,10 +112,7 @@ class BookingService
     }
 
     /**
-     * Get dashboard statistics (optimized)
-     */
-    /**
-     * Get dashboard statistics (FULLY OPTIMIZED)
+     * Get dashboard statistics 
      */
     public function getDashboardStats()
     {
@@ -134,7 +131,7 @@ class BookingService
     ", [$today, $thisMonth, $today, $thisMonth])
             ->first();
 
-        // 2. Recent bookings dengan JOIN untuk avoid N+1
+        // 2. Recent bookings
         $recentBookings = DB::table('bookings')
             ->join('fields', 'bookings.field_id', '=', 'fields.id')
             ->join('venues', 'fields.venue_id', '=', 'venues.id')
@@ -154,12 +151,12 @@ class BookingService
             ->limit(10)
             ->get();
 
-        // 3. Booking by status - single query
+        // 3. Booking by status
         $bookingsByStatus = Booking::selectRaw('status, count(*) as count')
             ->groupBy('status')
             ->pluck('count', 'status');
 
-        // 4. Revenue by venue - single query dengan JOIN
+        // 4. Revenue by venue 
         $revenueByVenue = DB::table('bookings')
             ->join('fields', 'bookings.field_id', '=', 'fields.id')
             ->join('venues', 'fields.venue_id', '=', 'venues.id')
