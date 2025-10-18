@@ -6,22 +6,37 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
+    /**
+     * Run the migrations.
+     */
     public function up(): void
     {
-        Schema::create('venue_images', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('venue_id')->constrained()->onDelete('cascade');
-            $table->string('image_url', 500);
-            $table->string('caption')->nullable();
-            $table->integer('display_order')->default(0);
-            $table->timestamps();
+        // Update venues table untuk support local images
+        Schema::table('venues', function (Blueprint $table) {
+            // Ubah image_url jadi nullable dan tambah kolom baru
+            $table->string('image_path')->nullable()->after('image_url'); // Path lokal
+            $table->string('image_disk')->default('public')->after('image_path'); // Storage disk
+        });
 
-            $table->index('venue_id');
+        // Update venue_images table
+        Schema::table('venue_images', function (Blueprint $table) {
+            $table->string('image_path')->nullable()->after('image_url');
+            $table->string('image_disk')->default('public')->after('image_path');
+            $table->string('thumbnail_path')->nullable()->after('image_disk'); // Untuk optimize
         });
     }
 
+    /**
+     * Reverse the migrations.
+     */
     public function down(): void
     {
-        Schema::dropIfExists('venue_images');
+        Schema::table('venues', function (Blueprint $table) {
+            $table->dropColumn(['image_path', 'image_disk']);
+        });
+
+        Schema::table('venue_images', function (Blueprint $table) {
+            $table->dropColumn(['image_path', 'image_disk', 'thumbnail_path']);
+        });
     }
 };
