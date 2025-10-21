@@ -6,6 +6,7 @@ use Illuminate\Database\Seeder;
 use App\Models\User;
 use App\Models\Venue;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
 
 class VenueOwnerSeeder extends Seeder
 {
@@ -14,91 +15,115 @@ class VenueOwnerSeeder extends Seeder
      */
     public function run(): void
     {
-        // 1. Create Super Admin
-        $superAdmin = User::firstOrCreate(
-            ['email' => 'superadmin@example.com'],
-            [
-                'name' => 'Super Admin',
-                'password' => Hash::make('password'),
-                'role' => 'super_admin',
-            ]
-        );
+        DB::beginTransaction();
 
-        echo "✓ Super Admin created: {$superAdmin->email}\n";
+        try {
+            // 1. Create Super Admin
+            $superAdmin = User::updateOrCreate(
+                ['email' => 'superadmin@example.com'],
+                [
+                    'name' => 'Super Admin',
+                    'password' => Hash::make('password'),
+                    'role' => 'super_admin',
+                ]
+            );
 
-        // 2. Create Admin Futsal Center Jakarta
-        $adminJakarta = User::firstOrCreate(
-            ['email' => 'admin.jakarta@example.com'],
-            [
-                'name' => 'Admin Futsal Jakarta',
-                'password' => Hash::make('password'),
-                'role' => 'admin',
-            ]
-        );
+            echo "✓ Super Admin created/updated: {$superAdmin->email}\n";
 
-        echo "✓ Admin Jakarta created: {$adminJakarta->email}\n";
+            // 2. Create Admin Futsal Center Jakarta
+            $adminJakarta = User::updateOrCreate(
+                ['email' => 'admin.jakarta@example.com'],
+                [
+                    'name' => 'Admin Futsal Jakarta',
+                    'password' => Hash::make('password'),
+                    'role' => 'admin',
+                ]
+            );
 
-        // 3. Create Admin Futsal Center Bandung
-        $adminBandung = User::firstOrCreate(
-            ['email' => 'admin.bandung@example.com'],
-            [
-                'name' => 'Admin Futsal Bandung',
-                'password' => Hash::make('password'),
-                'role' => 'admin',
-            ]
-        );
+            echo "✓ Admin Jakarta created/updated: {$adminJakarta->email}\n";
 
-        echo "✓ Admin Bandung created: {$adminBandung->email}\n";
+            // 3. Create Admin Futsal Center Bandung
+            $adminBandung = User::updateOrCreate(
+                ['email' => 'admin.bandung@example.com'],
+                [
+                    'name' => 'Admin Futsal Bandung',
+                    'password' => Hash::make('password'),
+                    'role' => 'admin',
+                ]
+            );
 
-        // 4. Create Admin Futsal Center Surabaya
-        $adminSurabaya = User::firstOrCreate(
-            ['email' => 'admin.surabaya@example.com'],
-            [
-                'name' => 'Admin Futsal Surabaya',
-                'password' => Hash::make('password'),
-                'role' => 'admin',
-            ]
-        );
+            echo "✓ Admin Bandung created/updated: {$adminBandung->email}\n";
 
-        echo "✓ Admin Surabaya created: {$adminSurabaya->email}\n";
+            // 4. Create Admin Futsal Center Surabaya
+            $adminSurabaya = User::updateOrCreate(
+                ['email' => 'admin.surabaya@example.com'],
+                [
+                    'name' => 'Admin Futsal Surabaya',
+                    'password' => Hash::make('password'),
+                    'role' => 'admin',
+                ]
+            );
 
-        // 5. Assign venues to owners
-        // Jakarta venues
-        Venue::whereIn('name', ['Futsal Arena Jakarta', 'Sport Center Jakarta'])
-            ->update(['owner_id' => $adminJakarta->id]);
+            echo "✓ Admin Surabaya created/updated: {$adminSurabaya->email}\n";
 
-        echo "✓ Jakarta venues assigned to {$adminJakarta->name}\n";
+            // 5. Assign venues to owners (check if venues exist first)
+            // Jakarta venues
+            $jakartaVenues = Venue::whereIn('name', ['Futsal Arena Jakarta', 'Sport Center Jakarta'])->get();
+            if ($jakartaVenues->count() > 0) {
+                Venue::whereIn('name', ['Futsal Arena Jakarta', 'Sport Center Jakarta'])
+                    ->update(['owner_id' => $adminJakarta->id]);
+                echo "✓ Jakarta venues ({$jakartaVenues->count()}) assigned to {$adminJakarta->name}\n";
+            } else {
+                echo "⚠ No Jakarta venues found\n";
+            }
 
-        // Bandung venues
-        Venue::whereIn('name', ['Futsal Center Bandung', 'Bandung Sport Complex'])
-            ->update(['owner_id' => $adminBandung->id]);
+            // Bandung venues
+            $bandungVenues = Venue::whereIn('name', ['Futsal Center Bandung', 'Bandung Sport Complex'])->get();
+            if ($bandungVenues->count() > 0) {
+                Venue::whereIn('name', ['Futsal Center Bandung', 'Bandung Sport Complex'])
+                    ->update(['owner_id' => $adminBandung->id]);
+                echo "✓ Bandung venues ({$bandungVenues->count()}) assigned to {$adminBandung->name}\n";
+            } else {
+                echo "⚠ No Bandung venues found\n";
+            }
 
-        echo "✓ Bandung venues assigned to {$adminBandung->name}\n";
+            // Surabaya venues
+            $surabayaVenues = Venue::whereIn('name', ['Futsal Arena Surabaya', 'Surabaya Sport Hub'])->get();
+            if ($surabayaVenues->count() > 0) {
+                Venue::whereIn('name', ['Futsal Arena Surabaya', 'Surabaya Sport Hub'])
+                    ->update(['owner_id' => $adminSurabaya->id]);
+                echo "✓ Surabaya venues ({$surabayaVenues->count()}) assigned to {$adminSurabaya->name}\n";
+            } else {
+                echo "⚠ No Surabaya venues found\n";
+            }
 
-        // Surabaya venues
-        Venue::whereIn('name', ['Futsal Arena Surabaya', 'Surabaya Sport Hub'])
-            ->update(['owner_id' => $adminSurabaya->id]);
+            // 6. Create a customer for testing
+            $customer = User::updateOrCreate(
+                ['email' => 'customer@example.com'],
+                [
+                    'name' => 'Customer Test',
+                    'password' => Hash::make('password'),
+                    'role' => 'customer',
+                ]
+            );
 
-        echo "✓ Surabaya venues assigned to {$adminSurabaya->name}\n";
+            echo "✓ Customer created/updated: {$customer->email}\n";
 
-        // 6. Create a customer for testing
-        $customer = User::firstOrCreate(
-            ['email' => 'customer@example.com'],
-            [
-                'name' => 'Customer Test',
-                'password' => Hash::make('password'),
-                'role' => 'customer',
-            ]
-        );
+            DB::commit();
 
-        echo "✓ Customer created: {$customer->email}\n";
-
-        echo "\n=== SEEDING COMPLETE ===\n";
-        echo "Login credentials:\n";
-        echo "Super Admin: superadmin@example.com / password\n";
-        echo "Admin Jakarta: admin.jakarta@example.com / password\n";
-        echo "Admin Bandung: admin.bandung@example.com / password\n";
-        echo "Admin Surabaya: admin.surabaya@example.com / password\n";
-        echo "Customer: customer@example.com / password\n";
+            echo "\n=== SEEDING COMPLETE ===\n";
+            echo "Login credentials:\n";
+            echo "Super Admin: superadmin@example.com / password\n";
+            echo "Admin Jakarta: admin.jakarta@example.com / password\n";
+            echo "Admin Bandung: admin.bandung@example.com / password\n";
+            echo "Admin Surabaya: admin.surabaya@example.com / password\n";
+            echo "Customer: customer@example.com / password\n";
+        } catch (\Exception $e) {
+            DB::rollBack();
+            echo "\n❌ ERROR: " . $e->getMessage() . "\n";
+            echo "File: " . $e->getFile() . "\n";
+            echo "Line: " . $e->getLine() . "\n";
+            throw $e;
+        }
     }
 }
