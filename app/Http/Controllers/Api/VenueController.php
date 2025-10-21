@@ -199,14 +199,14 @@ class VenueController extends Controller
                 // Future dates - all booked slots count
                 $bookedSlotIds = Booking::where('field_id', $fieldId)
                     ->where('booking_date', $date)
-                    ->whereIn('status', ['pending', 'confirmed', 'paid'])
+                    ->whereIn('status', ['pending', 'confirmed'])
                     ->pluck('time_slot_id')
                     ->toArray();
             } elseif ($date === $today) {
                 // Today - only slots that haven't ended
                 $bookedSlotIds = Booking::where('field_id', $fieldId)
                     ->where('booking_date', $date)
-                    ->whereIn('status', ['pending', 'confirmed', 'paid'])
+                    ->whereIn('status', ['pending', 'confirmed'])
                     ->whereHas('timeSlot', function ($query) use ($currentTime) {
                         $query->where('end_time', '>', $currentTime);
                     })
@@ -215,8 +215,13 @@ class VenueController extends Controller
 
                 // Auto-complete past bookings (background cleanup)
                 $this->autoCompletePastBookings($fieldId, $date, $currentTime);
+            } else { // Past dates ($date < $today)
+                $bookedSlotIds = Booking::where('field_id', $fieldId)
+                    ->where('booking_date', $date)
+                    ->whereIn('status', ['confirmed', 'completed'])
+                    ->pluck('time_slot_id')
+                    ->toArray();
             }
-            // else: past dates ($date < $today) - $bookedSlotIds remains empty array
 
             Log::info('Booked slots', [
                 'date' => $date,
