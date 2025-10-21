@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 
 class BookingService
 {
@@ -114,18 +115,25 @@ class BookingService
     /**
      * Get dashboard statistics (Filtered by venue ownership)
      */
-    public function getDashboardStats()
+    public function getDashboardStats(Request $request)
     {
-        $user = Auth::user();
+        // --- FIX: Gunakan $request->user() ---
+        $user = $request->user();
+
+        // Pengecekan null tetap penting untuk keamanan
+        if (!$user) {
+            Log::warning('Attempted to get dashboard stats without authenticated user.');
+            return [null];
+        }
+
         $today = now()->format('Y-m-d');
         $thisMonth = now()->format('Y-m');
 
-        // Base query dengan filter venue
         $baseQuery = Booking::query();
+        $venueIds = [];
 
-        // Filter by venue ownership jika admin biasa
         if ($user->role === 'admin') {
-            $venueIds = $user->getVenueIds();
+            $venueIds = $user->getVenueIds(); // Sekarang aman karena $user pasti ada
             $baseQuery->whereHas('field', function ($query) use ($venueIds) {
                 $query->whereIn('venue_id', $venueIds);
             });
@@ -225,7 +233,17 @@ class BookingService
      */
     public function getAllBookings(Request $request)
     {
-        $user = Auth::user();
+        // --- GUNAKAN $request->user() ---
+        $user = $request->user();
+
+        // --- Pengecekan null tetap penting ---
+        if (!$user) {
+            Log::warning('Attempted to get all bookings without authenticated user.');
+            $perPage = $request->get('per_page', 20);
+            // Gunakan constructor 'new'
+            return new LengthAwarePaginator([], 0, $perPage);
+        }
+        // --- Akhir Pengecekan ---
 
         $query = Booking::with([
             'field:id,venue_id,name',
@@ -236,7 +254,8 @@ class BookingService
 
         // Filter by venue ownership jika admin biasa
         if ($user->role === 'admin') {
-            $venueIds = $user->getVenueIds();
+            // --- Panggil getVenueIds() di sini (sudah aman) ---
+            $venueIds = $user->getVenueIds(); // Baris ~248 di screenshot Anda
             $query->whereHas('field', function ($q) use ($venueIds) {
                 $q->whereIn('venue_id', $venueIds);
             });

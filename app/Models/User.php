@@ -7,6 +7,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use App\Models\Venue;
 
 class User extends Authenticatable
 {
@@ -33,16 +34,17 @@ class User extends Authenticatable
         ];
     }
 
+
+    public function venues(): HasMany
+    {
+        return $this->hasMany(Venue::class, 'owner_id');
+    }
+
+
     // Helper methods untuk check role
     public function isAdmin(): bool
     {
         return $this->role === 'admin';
-    }
-
-    public function venues(): HasMany
-    {
-        // Hanya berlaku jika rolenya admin
-        return $this->hasMany(Venue::class, 'owner_id');
     }
 
     // Helper method untuk cek apakah user adalah owner venue tertentu
