@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Venue extends Model
 {
@@ -11,6 +12,7 @@ class Venue extends Model
 
     protected $fillable = [
         'name',
+        'owner_id',
         'slug',
         'description',
         'address',
@@ -32,6 +34,12 @@ class Venue extends Model
     public function fields()
     {
         return $this->hasMany(Field::class);
+    }
+
+    // Relasi ke User (pemilik venue)
+    public function owner(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'owner_id');
     }
 
     public function facilities()

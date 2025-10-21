@@ -112,31 +112,44 @@ class BookingService
     }
 
     /**
-     * Get dashboard statistics 
+     * Get dashboard statistics (Filtered by venue ownership)
      */
     public function getDashboardStats()
     {
+        $user = Auth::user();
         $today = now()->format('Y-m-d');
         $thisMonth = now()->format('Y-m');
 
-        // 1. Single query untuk semua aggregate stats
-        $stats = Booking::selectRaw("
-        COUNT(*) as total_bookings,
-        COUNT(CASE WHEN DATE(booking_date) = ? THEN 1 END) as today_bookings,
-        COUNT(CASE WHEN DATE_FORMAT(booking_date, '%Y-%m') = ? THEN 1 END) as monthly_bookings,
-        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_bookings,
-        SUM(CASE WHEN status IN ('confirmed', 'completed') THEN total_amount ELSE 0 END) as total_revenue,
-        SUM(CASE WHEN DATE(booking_date) = ? AND status IN ('confirmed', 'completed') THEN total_amount ELSE 0 END) as today_revenue,
-        SUM(CASE WHEN DATE_FORMAT(booking_date, '%Y-%m') = ? AND status IN ('confirmed', 'completed') THEN total_amount ELSE 0 END) as monthly_revenue
-    ", [$today, $thisMonth, $today, $thisMonth])
+        // Base query dengan filter venue
+        $baseQuery = Booking::query();
+
+        // Filter by venue ownership jika admin biasa
+        if ($user->role === 'admin') {
+            $venueIds = $user->getVenueIds();
+            $baseQuery->whereHas('field', function ($query) use ($venueIds) {
+                $query->whereIn('venue_id', $venueIds);
+            });
+        }
+
+        // 1. Aggregate stats
+        $stats = (clone $baseQuery)->selectRaw("
+            COUNT(*) as total_bookings,
+            COUNT(CASE WHEN DATE(booking_date) = ? THEN 1 END) as today_bookings,
+            COUNT(CASE WHEN DATE_FORMAT(booking_date, '%Y-%m') = ? THEN 1 END) as monthly_bookings,
+            COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_bookings,
+            SUM(CASE WHEN status IN ('confirmed', 'completed') THEN total_amount ELSE 0 END) as total_revenue,
+            SUM(CASE WHEN DATE(booking_date) = ? AND status IN ('confirmed', 'completed') THEN total_amount ELSE 0 END) as today_revenue,
+            SUM(CASE WHEN DATE_FORMAT(booking_date, '%Y-%m') = ? AND status IN ('confirmed', 'completed') THEN total_amount ELSE 0 END) as monthly_revenue
+        ", [$today, $thisMonth, $today, $thisMonth])
             ->first();
 
-        // 2. Recent bookings - MENGGUNAKAN ELOQUENT dengan eager loading
-        $recentBookings = Booking::with([
-            'field:id,venue_id,name',
-            'field.venue:id,name',
-            'payment:id,booking_id,payment_status,paid_at'
-        ])
+        // 2. Recent bookings
+        $recentBookings = (clone $baseQuery)
+            ->with([
+                'field:id,venue_id,name',
+                'field.venue:id,name',
+                'payment:id,booking_id,payment_status,paid_at'
+            ])
             ->select([
                 'id',
                 'booking_number',
@@ -156,15 +169,24 @@ class BookingService
             ->get();
 
         // 3. Booking by status
-        $bookingsByStatus = Booking::selectRaw('status, count(*) as count')
+        $bookingsByStatus = (clone $baseQuery)
+            ->selectRaw('status, count(*) as count')
             ->groupBy('status')
             ->pluck('count', 'status');
 
-        // 4. Revenue by venue 
-        $revenueByVenue = DB::table('bookings')
+        // 4. Revenue by venue (filtered)
+        $revenueQuery = DB::table('bookings')
             ->join('fields', 'bookings.field_id', '=', 'fields.id')
             ->join('venues', 'fields.venue_id', '=', 'venues.id')
-            ->whereIn('bookings.status', ['confirmed', 'completed']) // FIX: gunakan whereIn
+            ->whereIn('bookings.status', ['confirmed', 'completed']);
+
+        // Apply venue filter
+        if ($user->role === 'admin') {
+            $venueIds = $user->getVenueIds();
+            $revenueQuery->whereIn('venues.id', $venueIds);
+        }
+
+        $revenueByVenue = $revenueQuery
             ->select(
                 'venues.id as venue_id',
                 'venues.name as venue_name',
@@ -193,20 +215,32 @@ class BookingService
             'recent_bookings' => $recentBookings,
             'bookings_by_status' => $bookingsByStatus,
             'revenue_by_venue' => $revenueByVenue,
+            'user_role' => $user->role,
+            'managed_venues_count' => $user->role === 'admin' ? count($user->getVenueIds()) : 'all',
         ];
     }
 
     /**
-     * Get all bookings with filters (optimized)
+     * Get all bookings with filters (filtered by venue ownership)
      */
     public function getAllBookings(Request $request)
     {
+        $user = Auth::user();
+
         $query = Booking::with([
             'field:id,venue_id,name',
             'field.venue:id,name',
             'payment:booking_id,payment_status',
             'user:id,name,email'
         ]);
+
+        // Filter by venue ownership jika admin biasa
+        if ($user->role === 'admin') {
+            $venueIds = $user->getVenueIds();
+            $query->whereHas('field', function ($q) use ($venueIds) {
+                $q->whereIn('venue_id', $venueIds);
+            });
+        }
 
         // Filter by status
         if ($request->filled('status') && $request->status !== 'all') {
@@ -228,7 +262,7 @@ class BookingService
             $query->where('booking_date', '<=', $request->end_date);
         }
 
-        // Filter by venue
+        // Filter by venue (additional filter pada venue yang sudah di-scope)
         if ($request->filled('venue_id')) {
             $query->whereHas('field', function ($q) use ($request) {
                 $q->where('venue_id', $request->venue_id);

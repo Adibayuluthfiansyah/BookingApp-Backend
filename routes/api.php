@@ -5,19 +5,19 @@ use App\Http\Controllers\Api\VenueController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BookingController;
 
+
 // Public routes
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
 
-
-// Venue Routes
+// Public Venue Routes (tidak perlu auth untuk customer melihat venue)
 Route::prefix('venues')->group(function () {
     Route::get('/', [VenueController::class, 'index']);
     Route::get('/{id}', [VenueController::class, 'show']);
     Route::get('/{id}/available-slots', [VenueController::class, 'getAvailableSlots']);
 });
 
-// Booking Routes
+// Public Booking Routes
 Route::post('/bookings', [BookingController::class, 'createBooking']);
 Route::post('/midtrans/callback', [BookingController::class, 'handleCallback']);
 Route::get('/bookings/{bookingNumber}/status', [BookingController::class, 'getBookingStatus']);
@@ -53,46 +53,69 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/refresh', [AuthController::class, 'refresh']);
 
-
-    // Admin routes
-    Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
-        // Dashboard Stats
+    // Admin routes (dengan filter venue ownership)
+    Route::middleware(['role:admin'])->prefix('admin')->group(function () {
+        // Dashboard Stats (filtered by venue ownership)
         Route::get('/dashboard', [BookingController::class, 'getDashboardStats']);
 
-        // Bookings Management
+        // Bookings Management (filtered by venue ownership)
         Route::get('/bookings', [BookingController::class, 'getAllBookings']);
         Route::get('/bookings/{id}', [BookingController::class, 'getBookingDetail']);
         Route::patch('/bookings/{id}/status', [BookingController::class, 'updateBookingStatus']);
 
-        // Venues Management
+        // Venues Management (admin can manage their own venues)
         Route::prefix('venues')->group(function () {
+            // List venues (akan otomatis ter-filter by owner_id di controller)
+            Route::get('/', [VenueController::class, 'index']);
+
+            // Get single venue (dengan ownership check)
+            Route::get('/{id}', [VenueController::class, 'show']);
+
+            // Create new venue (owner_id auto-assigned)
             Route::post('/', [VenueController::class, 'store']);
+
+            // Update venue (dengan ownership check)
             Route::put('/{id}', [VenueController::class, 'update']);
+
+            // Delete venue (dengan ownership check)
             Route::delete('/{id}', [VenueController::class, 'destroy']);
+        });
+
+        // Get venues for dropdown (venues yang dimiliki admin ini)
+        Route::get('/my-venues', function () {
+            $user = auth()->user();
+            $venues = $user->venues()->select('id', 'name')->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $venues
+            ]);
         });
     });
 
     // Customer only routes
     Route::middleware('role:customer')->prefix('customer')->group(function () {
         Route::get('/bookings', function () {
+            $bookings = \App\Models\Booking::where('user_id', auth()->id())
+                ->with(['field.venue', 'payment'])
+                ->orderBy('created_at', 'desc')
+                ->get();
+
             return response()->json([
                 'success' => true,
                 'message' => 'Customer bookings',
-                'data' => [
-                    'bookings' => []
-                ]
+                'data' => $bookings
             ]);
         });
-
-        //Midtrans routes for testing
-        Route::get('/midtrans/test', function () {
-            return response()->json([
-                'success' => true,
-                'message' => 'Midtrans callback endpoint is reachable',
-                'timestamp' => now(),
-                'app_url' => config('app.url'),
-            ]);
-        });
-        // Tambahkan route customer lainnya di sini
     });
+});
+
+// Midtrans test routes
+Route::get('/midtrans/test', function () {
+    return response()->json([
+        'success' => true,
+        'message' => 'Midtrans callback endpoint is reachable',
+        'timestamp' => now(),
+        'app_url' => config('app.url'),
+    ]);
 });

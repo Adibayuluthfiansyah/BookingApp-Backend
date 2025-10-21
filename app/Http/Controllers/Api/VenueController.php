@@ -9,16 +9,23 @@ use App\Models\TimeSlot;
 use App\Models\Booking;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Auth;
 
 class VenueController extends Controller
 {
     /**
-     * Get all venues
+     * Get all venues (filtered by owner for admin)
      */
     public function index(Request $request)
     {
         try {
-            $query = Venue::with(['fields.timeSlots', 'facilities', 'images']);
+            $query = Venue::with(['fields.timeSlots', 'facilities', 'images', 'owner:id,name,email']);
+
+            // Filter by owner jika bukan super admin
+            $user = Auth::user();
+            if ($user && $user->role === 'admin') {
+                $query->where('owner_id', $user->id);
+            }
 
             // Search
             if ($request->has('search')) {
@@ -53,14 +60,19 @@ class VenueController extends Controller
 
             $venues = $query->get();
 
-            Log::info('Venues fetched', ['count' => $venues->count()]);
+            Log::info('Venues fetched', [
+                'count' => $venues->count(),
+                'user_id' => $user?->id,
+                'role' => $user?->role
+            ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Venues retrieved successfully',
                 'data' => $venues,
                 'meta' => [
-                    'total' => $venues->count()
+                    'total' => $venues->count(),
+                    'is_filtered' => $user && $user->role === 'admin'
                 ]
             ]);
         } catch (\Exception $e) {
@@ -78,28 +90,39 @@ class VenueController extends Controller
     }
 
     /**
-     * Get venue by ID or slug
+     * Get venue by ID or slug (with owner check)
      */
     public function show($identifier)
     {
         try {
             Log::info('Fetching venue', ['identifier' => $identifier]);
 
-            $venue = Venue::with([
+            $query = Venue::with([
                 'fields.timeSlots',
                 'facilities',
-                'images'
+                'images',
+                'owner:id,name,email'
             ])
                 ->where('id', $identifier)
-                ->orWhere('slug', $identifier)
-                ->first();
+                ->orWhere('slug', $identifier);
+
+            // Filter by owner jika admin
+            $user = Auth::user();
+            if ($user && $user->role === 'admin') {
+                $query->where('owner_id', $user->id);
+            }
+
+            $venue = $query->first();
 
             if (!$venue) {
-                Log::warning('Venue not found', ['identifier' => $identifier]);
+                Log::warning('Venue not found or access denied', [
+                    'identifier' => $identifier,
+                    'user_id' => $user?->id
+                ]);
 
                 return response()->json([
                     'success' => false,
-                    'message' => 'Venue tidak ditemukan',
+                    'message' => 'Venue tidak ditemukan atau Anda tidak memiliki akses',
                     'data' => null
                 ], 404);
             }
@@ -122,6 +145,149 @@ class VenueController extends Controller
                 'success' => false,
                 'message' => 'Gagal mengambil data venue: ' . $e->getMessage(),
                 'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Create new venue (Admin only)
+     */
+    public function store(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'name' => 'required|string|max:255',
+                'description' => 'required|string',
+                'address' => 'required|string',
+                'phone' => 'required|string|max:20',
+                'email' => 'required|email',
+                // ... validasi lainnya
+            ]);
+
+            $user = Auth::user();
+
+            // Auto-assign owner_id
+            $validated['owner_id'] = $user->id;
+
+            // Generate slug
+            $validated['slug'] = \Illuminate\Support\Str::slug($validated['name']);
+
+            $venue = Venue::create($validated);
+
+            Log::info('Venue created', [
+                'venue_id' => $venue->id,
+                'owner_id' => $user->id
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Venue berhasil dibuat',
+                'data' => $venue->load('owner')
+            ], 201);
+        } catch (\Exception $e) {
+            Log::error('Error creating venue', [
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal membuat venue: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Update venue (Admin only, must own the venue)
+     */
+    public function update(Request $request, $id)
+    {
+        try {
+            $user = Auth::user();
+
+            $venue = Venue::find($id);
+
+            if (!$venue) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Venue tidak ditemukan'
+                ], 404);
+            }
+
+            // Check ownership (kecuali super admin)
+            if ($user->role !== 'super_admin' && $venue->owner_id !== $user->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Anda tidak memiliki akses untuk mengupdate venue ini'
+                ], 403);
+            }
+
+            $validated = $request->validate([
+                'name' => 'sometimes|string|max:255',
+                'description' => 'sometimes|string',
+                'address' => 'sometimes|string',
+                // ... validasi lainnya
+            ]);
+
+            $venue->update($validated);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Venue berhasil diupdate',
+                'data' => $venue->load('owner')
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error updating venue', [
+                'venue_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengupdate venue'
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete venue (Admin only, must own the venue)
+     */
+    public function destroy($id)
+    {
+        try {
+            $user = Auth::user();
+
+            $venue = Venue::find($id);
+
+            if (!$venue) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Venue tidak ditemukan'
+                ], 404);
+            }
+
+            // Check ownership
+            if ($user->role !== 'super_admin' && $venue->owner_id !== $user->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Anda tidak memiliki akses untuk menghapus venue ini'
+                ], 403);
+            }
+
+            $venue->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Venue berhasil dihapus'
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error deleting venue', [
+                'venue_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal menghapus venue'
             ], 500);
         }
     }
@@ -189,10 +355,6 @@ class VenueController extends Controller
             }
 
             // Get booked slots (ONLY those that are still relevant)
-            // SMART LOGIC:
-            // - For past dates: return empty (all slots available)
-            // - For future dates: get all booked slots
-            // - For today: only get slots that haven't ended yet
             $bookedSlotIds = [];
 
             if ($date > $today) {
@@ -215,22 +377,13 @@ class VenueController extends Controller
 
                 // Auto-complete past bookings (background cleanup)
                 $this->autoCompletePastBookings($fieldId, $date, $currentTime);
-            } else { // Past dates ($date < $today)
+            } else {
                 $bookedSlotIds = Booking::where('field_id', $fieldId)
                     ->where('booking_date', $date)
                     ->whereIn('status', ['confirmed', 'completed'])
                     ->pluck('time_slot_id')
                     ->toArray();
             }
-
-            Log::info('Booked slots', [
-                'date' => $date,
-                'is_past' => $date < $today,
-                'is_today' => $date === $today,
-                'is_future' => $date > $today,
-                'booked_count' => count($bookedSlotIds),
-                'booked_ids' => $bookedSlotIds
-            ]);
 
             // Map availability with past slot detection
             $slotsWithStatus = $allSlots->map(function ($slot) use ($bookedSlotIds, $date, $today, $currentTime) {
@@ -239,9 +392,9 @@ class VenueController extends Controller
                 // Check if slot is in the past
                 $isPastSlot = false;
                 if ($date < $today) {
-                    $isPastSlot = true; // All slots on past dates
+                    $isPastSlot = true;
                 } elseif ($date === $today && $slot->end_time <= $currentTime) {
-                    $isPastSlot = true; // Today's slots that have ended
+                    $isPastSlot = true;
                 }
 
                 return [
@@ -269,17 +422,10 @@ class VenueController extends Controller
                     'is_today' => $date === $today,
                 ]
             ]);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Data tidak valid',
-                'errors' => $e->errors(),
-            ], 422);
         } catch (\Exception $e) {
             Log::error('Error fetching slots', [
                 'venue_id' => $venueId,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error' => $e->getMessage()
             ]);
 
             return response()->json([
@@ -295,7 +441,6 @@ class VenueController extends Controller
     private function autoCompletePastBookings($fieldId, $date, $currentTime)
     {
         try {
-            // Find and auto-complete bookings that have ended
             $completed = Booking::where('field_id', $fieldId)
                 ->where('booking_date', $date)
                 ->where('end_time', '<=', $currentTime)
@@ -306,7 +451,6 @@ class VenueController extends Controller
                 Log::info('Auto-completed past bookings', [
                     'field_id' => $fieldId,
                     'date' => $date,
-                    'current_time' => $currentTime,
                     'completed_count' => $completed
                 ]);
             }
@@ -314,7 +458,6 @@ class VenueController extends Controller
             Log::error('Error auto-completing past bookings', [
                 'error' => $e->getMessage()
             ]);
-            // Don't throw - this is background cleanup
         }
     }
 }

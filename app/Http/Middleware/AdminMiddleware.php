@@ -15,6 +15,20 @@ class AdminMiddleware
     public function handle(Request $request, Closure $next): Response
     {
         $user = Auth::user();
+        $user = $request->user();
+
+        // Skip jika super admin
+        if ($user && $user->role === 'super_admin') {
+            return $next($request);
+        }
+
+        // Jika admin biasa, hanya bisa akses venue miliknya
+        if ($user && $user->role === 'admin') {
+            // Attach venue IDs ke request untuk digunakan di controller
+            $request->merge([
+                'accessible_venue_ids' => $user->getVenueIds()
+            ]);
+        }
 
         // Kalau belum login / token tidak valid
         if (!$user) {
