@@ -286,9 +286,11 @@ class BookingController extends Controller
     public function getDashboardStats(Request $request)
     {
         try {
+            // --- PASTIKAN ANDA MENGIRIMKAN '$request' KE SERVICE ---
             $stats = $this->bookingService->getDashboardStats($request);
 
-            if ($stats === null || (is_array($stats) && $stats[0] === null)) {
+            // Handle jika user null
+            if ($stats === null || (is_array($stats) && isset($stats[0]) && $stats[0] === null)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Gagal mengambil statistik: User tidak terautentikasi'
@@ -300,13 +302,14 @@ class BookingController extends Controller
                 'data' => $stats
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching dashboard stats', [
-                'error' => $e->getMessage()
+            Log::error('Error fetching dashboard stats from controller', [ // Log error
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal mengambil statistik'
+                'message' => 'Gagal mengambil statistik: ' . $e->getMessage()
             ], 500);
         }
     }
