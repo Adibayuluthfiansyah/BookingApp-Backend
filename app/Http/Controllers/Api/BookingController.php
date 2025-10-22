@@ -10,7 +10,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
-
 class BookingController extends Controller
 {
     private BookingService $bookingService;
@@ -23,7 +22,7 @@ class BookingController extends Controller
     }
 
     /**
-     * Create new booking
+     * Create new booking (PUBLIC - support guest & logged-in user)
      */
     public function createBooking(Request $request)
     {
@@ -40,6 +39,17 @@ class BookingController extends Controller
                 'notes' => 'nullable|string',
             ]);
 
+            // ✅ AUTO-DETECT: Ambil user_id jika user sedang login
+            $user = auth('sanctum')->user();
+            $validated['user_id'] = $user ? $user->id : null;
+
+            // ✅ Log booking type untuk debugging
+            Log::info('Booking type:', [
+                'is_guest' => $user === null,
+                'user_id' => $validated['user_id'],
+                'customer_email' => $validated['customer_email']
+            ]);
+
             DB::beginTransaction();
 
             // Create booking via service
@@ -53,7 +63,11 @@ class BookingController extends Controller
 
             DB::commit();
 
-            Log::info('=== BOOKING CREATED SUCCESSFULLY ===');
+            Log::info('=== BOOKING CREATED SUCCESSFULLY ===', [
+                'booking_number' => $booking->booking_number,
+                'user_id' => $booking->user_id,
+                'is_guest' => $booking->user_id === null
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -181,6 +195,8 @@ class BookingController extends Controller
                     'last_page' => $bookings->lastPage(),
                     'per_page' => $bookings->perPage(),
                     'total' => $bookings->total(),
+                    'from' => $bookings->firstItem(),
+                    'to' => $bookings->lastItem(),
                 ]
             ]);
         } catch (\Exception $e) {
@@ -267,10 +283,17 @@ class BookingController extends Controller
     /**
      * Get dashboard statistics (Admin)
      */
-    public function getDashboardStats()
+    public function getDashboardStats(Request $request)
     {
         try {
-            $stats = $this->bookingService->getDashboardStats();
+            $stats = $this->bookingService->getDashboardStats($request);
+
+            if ($stats === null || (is_array($stats) && $stats[0] === null)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Gagal mengambil statistik: User tidak terautentikasi'
+                ], 401);
+            }
 
             return response()->json([
                 'success' => true,
@@ -285,6 +308,63 @@ class BookingController extends Controller
                 'success' => false,
                 'message' => 'Gagal mengambil statistik'
             ], 500);
+        }
+    }
+
+    /**
+     * ✅ TAMBAHAN: Get logged-in customer's bookings
+     */
+    public function getCustomerBookings(Request $request)
+    {
+        try {
+            $user = $request->user();
+
+            $bookings = Booking::with(['field.venue', 'payment'])
+                ->where('user_id', $user->id)
+                ->orderBy('created_at', 'desc')
+                ->paginate(10);
+
+            return response()->json([
+                'success' => true,
+                'data' => $bookings->items(),
+                'meta' => [
+                    'current_page' => $bookings->currentPage(),
+                    'last_page' => $bookings->lastPage(),
+                    'per_page' => $bookings->perPage(),
+                    'total' => $bookings->total(),
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching customer bookings:', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil data booking'
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ TAMBAHAN: Get customer booking detail
+     */
+    public function getCustomerBookingDetail(Request $request, $id)
+    {
+        try {
+            $user = $request->user();
+
+            $booking = Booking::with(['field.venue', 'payment'])
+                ->where('user_id', $user->id)
+                ->where('id', $id)
+                ->firstOrFail();
+
+            return response()->json([
+                'success' => true,
+                'data' => $booking
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Booking tidak ditemukan'
+            ], 404);
         }
     }
 }

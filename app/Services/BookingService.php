@@ -6,6 +6,7 @@ use App\Models\Booking;
 use App\Models\TimeSlot;
 use App\Models\Field;
 use App\Models\Payment;
+use App\Models\Venue;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
@@ -15,7 +16,7 @@ use Illuminate\Pagination\LengthAwarePaginator;
 class BookingService
 {
     /**
-     * Create new booking
+     * Create new booking (support guest & logged-in user)
      */
     public function createBooking(array $data)
     {
@@ -36,7 +37,8 @@ class BookingService
             $booking = Booking::create([
                 'field_id' => $data['field_id'],
                 'time_slot_id' => $data['time_slot_id'],
-                'user_id' => Auth::check() ? Auth::id() : null,
+                // ✅ PERBAIKAN: Gunakan dari $data (bisa null untuk guest)
+                'user_id' => $data['user_id'] ?? null,
                 'booking_date' => $data['booking_date'],
                 'start_time' => $timeSlot->start_time,
                 'end_time' => $timeSlot->end_time,
@@ -64,7 +66,7 @@ class BookingService
             ['time_slot_id', '=', $timeSlotId],
             ['booking_date', '=', $date],
         ])
-            ->whereIn('status', ['pending', 'confirmed', 'completed'])
+            ->whereIn('status', ['pending', 'confirmed', 'completed', 'paid'])
             ->exists();
     }
 
@@ -117,10 +119,8 @@ class BookingService
      */
     public function getDashboardStats(Request $request)
     {
-        // --- FIX: Gunakan $request->user() ---
         $user = $request->user();
 
-        // Pengecekan null tetap penting untuk keamanan
         if (!$user) {
             Log::warning('Attempted to get dashboard stats without authenticated user.');
             return [null];
@@ -132,11 +132,15 @@ class BookingService
         $baseQuery = Booking::query();
         $venueIds = [];
 
+        // Filter HANYA untuk 'admin', BUKAN 'super_admin'
         if ($user->role === 'admin') {
-            $venueIds = $user->getVenueIds(); // Sekarang aman karena $user pasti ada
+            $venueIds = $user->getVenueIds();
+            Log::info('Filtering dashboard stats for admin', ['user_id' => $user->id, 'venue_ids' => $venueIds]);
             $baseQuery->whereHas('field', function ($query) use ($venueIds) {
                 $query->whereIn('venue_id', $venueIds);
             });
+        } elseif ($user->role === 'super_admin') {
+            Log::info('Fetching dashboard stats for super admin', ['user_id' => $user->id]);
         }
 
         // 1. Aggregate stats
@@ -145,9 +149,9 @@ class BookingService
             COUNT(CASE WHEN DATE(booking_date) = ? THEN 1 END) as today_bookings,
             COUNT(CASE WHEN DATE_FORMAT(booking_date, '%Y-%m') = ? THEN 1 END) as monthly_bookings,
             COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_bookings,
-            SUM(CASE WHEN status IN ('confirmed', 'completed') THEN total_amount ELSE 0 END) as total_revenue,
-            SUM(CASE WHEN DATE(booking_date) = ? AND status IN ('confirmed', 'completed') THEN total_amount ELSE 0 END) as today_revenue,
-            SUM(CASE WHEN DATE_FORMAT(booking_date, '%Y-%m') = ? AND status IN ('confirmed', 'completed') THEN total_amount ELSE 0 END) as monthly_revenue
+            SUM(CASE WHEN status IN ('confirmed', 'completed', 'paid') THEN total_amount ELSE 0 END) as total_revenue,
+            SUM(CASE WHEN DATE(booking_date) = ? AND status IN ('confirmed', 'completed', 'paid') THEN total_amount ELSE 0 END) as today_revenue,
+            SUM(CASE WHEN DATE_FORMAT(booking_date, '%Y-%m') = ? AND status IN ('confirmed', 'completed', 'paid') THEN total_amount ELSE 0 END) as monthly_revenue
         ", [$today, $thisMonth, $today, $thisMonth])
             ->first();
 
@@ -156,12 +160,14 @@ class BookingService
             ->with([
                 'field:id,venue_id,name',
                 'field.venue:id,name',
-                'payment:id,booking_id,payment_status,paid_at'
+                'payment:id,booking_id,payment_status,paid_at',
+                'user:id,name,email'
             ])
             ->select([
                 'id',
                 'booking_number',
                 'field_id',
+                'user_id',
                 'booking_date',
                 'start_time',
                 'end_time',
@@ -186,11 +192,9 @@ class BookingService
         $revenueQuery = DB::table('bookings')
             ->join('fields', 'bookings.field_id', '=', 'fields.id')
             ->join('venues', 'fields.venue_id', '=', 'venues.id')
-            ->whereIn('bookings.status', ['confirmed', 'completed']);
+            ->whereIn('bookings.status', ['confirmed', 'completed', 'paid']);
 
-        // Apply venue filter
         if ($user->role === 'admin') {
-            $venueIds = $user->getVenueIds();
             $revenueQuery->whereIn('venues.id', $venueIds);
         }
 
@@ -206,6 +210,18 @@ class BookingService
             ->limit(5)
             ->get();
 
+        // Hitung managed venues
+        $managedVenuesCount = 0;
+        if ($user->role === 'admin') {
+            $managedVenuesCount = count($venueIds);
+        } elseif ($user->role === 'super_admin') {
+            $managedVenuesCount = Venue::count();
+        }
+
+        // ✅ TAMBAHAN: Stats untuk guest vs logged-in users
+        $guestBookingsCount = (clone $baseQuery)->whereNull('user_id')->count();
+        $userBookingsCount = (clone $baseQuery)->whereNotNull('user_id')->count();
+
         return [
             'today' => [
                 'bookings' => $stats->today_bookings ?? 0,
@@ -219,31 +235,29 @@ class BookingService
                 'total_bookings' => $stats->total_bookings ?? 0,
                 'total_revenue' => $stats->total_revenue ?? 0,
                 'pending_bookings' => $stats->pending_bookings ?? 0,
+                'guest_bookings' => $guestBookingsCount,
+                'user_bookings' => $userBookingsCount,
             ],
             'recent_bookings' => $recentBookings,
             'bookings_by_status' => $bookingsByStatus,
             'revenue_by_venue' => $revenueByVenue,
             'user_role' => $user->role,
-            'managed_venues_count' => $user->role === 'admin' ? count($user->getVenueIds()) : 'all',
+            'managed_venues_count' => $managedVenuesCount,
         ];
     }
 
     /**
      * Get all bookings with filters (filtered by venue ownership)
      */
-    public function getAllBookings(Request $request)
+    public function getAllBookings(Request $request): LengthAwarePaginator
     {
-        // --- GUNAKAN $request->user() ---
         $user = $request->user();
 
-        // --- Pengecekan null tetap penting ---
         if (!$user) {
             Log::warning('Attempted to get all bookings without authenticated user.');
             $perPage = $request->get('per_page', 20);
-            // Gunakan constructor 'new'
             return new LengthAwarePaginator([], 0, $perPage);
         }
-        // --- Akhir Pengecekan ---
 
         $query = Booking::with([
             'field:id,venue_id,name',
@@ -252,13 +266,17 @@ class BookingService
             'user:id,name,email'
         ]);
 
-        // Filter by venue ownership jika admin biasa
+        $venueIds = [];
+
+        // Filter HANYA untuk 'admin', BUKAN 'super_admin'
         if ($user->role === 'admin') {
-            // --- Panggil getVenueIds() di sini (sudah aman) ---
-            $venueIds = $user->getVenueIds(); // Baris ~248 di screenshot Anda
+            $venueIds = $user->getVenueIds();
+            Log::info('Filtering bookings for admin', ['user_id' => $user->id, 'venue_ids' => $venueIds]);
             $query->whereHas('field', function ($q) use ($venueIds) {
                 $q->whereIn('venue_id', $venueIds);
             });
+        } elseif ($user->role === 'super_admin') {
+            Log::info('Fetching all bookings for super admin', ['user_id' => $user->id]);
         }
 
         // Filter by status
@@ -273,6 +291,15 @@ class BookingService
             });
         }
 
+        // ✅ TAMBAHAN: Filter by booking type (guest vs user)
+        if ($request->filled('booking_type')) {
+            if ($request->booking_type === 'guest') {
+                $query->whereNull('user_id');
+            } elseif ($request->booking_type === 'user') {
+                $query->whereNotNull('user_id');
+            }
+        }
+
         // Filter by date range
         if ($request->filled('start_date')) {
             $query->where('booking_date', '>=', $request->start_date);
@@ -281,8 +308,11 @@ class BookingService
             $query->where('booking_date', '<=', $request->end_date);
         }
 
-        // Filter by venue (additional filter pada venue yang sudah di-scope)
+        // Filter by venue
         if ($request->filled('venue_id')) {
+            if ($user->role === 'admin' && !in_array($request->venue_id, $venueIds)) {
+                return new LengthAwarePaginator([], 0, $request->get('per_page', 20));
+            }
             $query->whereHas('field', function ($q) use ($request) {
                 $q->where('venue_id', $request->venue_id);
             });
@@ -295,14 +325,25 @@ class BookingService
                 $q->where('booking_number', 'like', "%{$search}%")
                     ->orWhere('customer_name', 'like', "%{$search}%")
                     ->orWhere('customer_email', 'like', "%{$search}%")
-                    ->orWhere('customer_phone', 'like', "%{$search}%");
+                    ->orWhere('customer_phone', 'like', "%{$search}%")
+                    ->orWhereHas('field.venue', function ($vq) use ($search) {
+                        $vq->where('name', 'like', "%{$search}%");
+                    })
+                    ->orWhereHas('field', function ($fq) use ($search) {
+                        $fq->where('name', 'like', "%{$search}%");
+                    });
             });
         }
 
         // Sort
         $sortBy = $request->get('sort_by', 'created_at');
         $sortOrder = $request->get('sort_order', 'desc');
-        $query->orderBy($sortBy, $sortOrder);
+        $allowedSorts = ['created_at', 'booking_date', 'total_amount', 'status'];
+        if (in_array($sortBy, $allowedSorts)) {
+            $query->orderBy($sortBy, $sortOrder);
+        } else {
+            $query->orderBy('created_at', 'desc');
+        }
 
         // Paginate
         $perPage = $request->get('per_page', 20);

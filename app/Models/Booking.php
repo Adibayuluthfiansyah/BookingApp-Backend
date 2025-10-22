@@ -102,4 +102,10 @@ class Booking extends Model
     {
         return 'Rp ' . number_format($this->total_amount, 0, ',', '.');
     }
+
+    // ✅ TAMBAHAN: Helper untuk cek guest booking
+    public function isGuestBooking(): bool
+    {
+        return $this->user_id === null;
+    }
 }
