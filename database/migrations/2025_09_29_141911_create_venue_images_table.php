@@ -11,18 +11,25 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Update venues table untuk support local images
+        // Update venues table untuk support local images (Ini sudah benar)
         Schema::table('venues', function (Blueprint $table) {
-            // Ubah image_url jadi nullable dan tambah kolom baru
             $table->string('image_path')->nullable()->after('image_url'); // Path lokal
             $table->string('image_disk')->default('public')->after('image_path'); // Storage disk
         });
 
-        // Update venue_images table
-        Schema::table('venue_images', function (Blueprint $table) {
-            $table->string('image_path')->nullable()->after('image_url');
-            $table->string('image_disk')->default('public')->after('image_path');
-            $table->string('thumbnail_path')->nullable()->after('image_disk'); // Untuk optimize
+        // FIX: Ganti dari Schema::table menjadi Schema::create
+        // Ini akan MEMBUAT tabel venue_images yang hilang
+        Schema::create('venue_images', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('venue_id')->constrained()->onDelete('cascade');
+            $table->string('image_url', 500)->nullable(); // Kolom asli dari model
+
+            // Kolom-kolom baru yang ingin kamu tambahkan
+            $table->string('image_path')->nullable();
+            $table->string('image_disk')->default('public');
+            $table->string('thumbnail_path')->nullable();
+
+            $table->timestamps();
         });
     }
 
@@ -35,8 +42,7 @@ return new class extends Migration
             $table->dropColumn(['image_path', 'image_disk']);
         });
 
-        Schema::table('venue_images', function (Blueprint $table) {
-            $table->dropColumn(['image_path', 'image_disk', 'thumbnail_path']);
-        });
+        // FIX: Ganti menjadi dropIfExists
+        Schema::dropIfExists('venue_images');
     }
 };
