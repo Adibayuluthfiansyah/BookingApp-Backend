@@ -126,7 +126,7 @@ class BookingService
             return [null];
         }
 
-        $today = now()->format('Y-m-d');
+        $today = now()->startOfDay();
         $thisMonth = now()->format('Y-m');
 
         $baseQuery = Booking::query();
@@ -146,13 +146,24 @@ class BookingService
         // 1. Aggregate stats
         $stats = (clone $baseQuery)->selectRaw("
             COUNT(*) as total_bookings,
+            
+            /* PERBAIKAN: Gunakan DATE() pada parameter, bukan pada kolom, agar lebih aman untuk index */
             COUNT(CASE WHEN DATE(booking_date) = ? THEN 1 END) as today_bookings,
+            
             COUNT(CASE WHEN DATE_FORMAT(booking_date, '%Y-%m') = ? THEN 1 END) as monthly_bookings,
             COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_bookings,
             SUM(CASE WHEN status IN ('confirmed', 'completed', 'paid') THEN total_amount ELSE 0 END) as total_revenue,
+            
+            /* PERBAIKAN: Gunakan query tanggal yang sama dengan today_bookings */
             SUM(CASE WHEN DATE(booking_date) = ? AND status IN ('confirmed', 'completed', 'paid') THEN total_amount ELSE 0 END) as today_revenue,
+            
             SUM(CASE WHEN DATE_FORMAT(booking_date, '%Y-%m') = ? AND status IN ('confirmed', 'completed', 'paid') THEN total_amount ELSE 0 END) as monthly_revenue
-        ", [$today, $thisMonth, $today, $thisMonth])
+        ", [
+            $today->format('Y-m-d'), // Kirim format Y-m-d ke query
+            $thisMonth,
+            $today->format('Y-m-d'), // Kirim format Y-m-d lagi
+            $thisMonth
+        ])
             ->first();
 
         // 2. Recent bookings
