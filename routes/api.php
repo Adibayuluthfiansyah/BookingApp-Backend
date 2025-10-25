@@ -52,6 +52,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('/{id}', [VenueController::class, 'destroy']);
         });
         // --- TAMBAHKAN ROUTE FIELDS DI SINI ---
+        Route::get('/my-venues', [VenueController::class, 'getMyVenuesList']);
         Route::apiResource('/fields', FieldController::class);
     });
 });

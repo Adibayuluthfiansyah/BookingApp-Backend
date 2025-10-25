@@ -292,6 +292,41 @@ class VenueController extends Controller
         }
     }
 
+
+    /**
+     * Get a simple list of venues (ID and Name) owned by the admin.
+     * Digunakan untuk dropdown form.
+     */
+    public function getMyVenuesList(Request $request)
+    {
+        try {
+            $user = $request->user();
+            $query = Venue::query();
+
+            if ($user->role === 'admin') {
+                $query->where('owner_id', $user->id);
+            }
+            // super_admin akan mendapatkan semua
+
+            $venues = $query->select('id', 'name')->orderBy('name')->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $venues
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching my-venues list', [
+                'error' => $e->getMessage(),
+                'user_id' => $request->user()->id
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil daftar venue'
+            ], 500);
+        }
+    }
+
     /**
      * Get available slots (OPTIMIZED dengan auto-release past slots)
      */
