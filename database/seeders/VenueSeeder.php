@@ -6,12 +6,30 @@ use App\Models\Venue;
 use App\Models\Field;
 use App\Models\TimeSlot;
 use App\Models\Facility;
+use App\Models\User;
 use Illuminate\Database\Seeder;
 
 class VenueSeeder extends Seeder
 {
     public function run(): void
     {
+        // 2. AMBIL USER ADMIN PERTAMA UNTUK DIJADIKAN PEMILIK
+        // Pastikan UserSeeder Anda sudah dijalankan sebelumnya
+        $adminUser = User::where('role', 'admin')->first();
+
+        // Jika tidak ada user admin, buat satu atau hentikan seeder
+        if (!$adminUser) {
+            $this->command->error('User admin tidak ditemukan. Harap jalankan UserSeeder.');
+            // Opsi lain: buat user admin baru jika tidak ada
+            // $adminUser = User::factory()->create([
+            //     'name' => 'Admin Owner',
+            //     'email' => 'adminowner@example.com',
+            //     'role' => 'admin'
+            // ]);
+            // $this->command->info('User admin baru dibuat.');
+            return; // Hentikan seeder
+        }
+
         // Create facilities first
         $toiletFacility = Facility::firstOrCreate(['name' => 'Toilet']);
         $mushollaFacility = Facility::firstOrCreate(['name' => 'Musholla']);
@@ -21,6 +39,7 @@ class VenueSeeder extends Seeder
 
         // Venue 1: GOR Senayan
         $venue1 = Venue::create([
+            'owner_id' => $adminUser->id,
             'name' => 'GOR Senayan Futsal',
             'slug' => 'gor-senayan-futsal',
             'description' => 'Lapangan futsal modern dengan fasilitas lengkap dan AC',
@@ -32,6 +51,8 @@ class VenueSeeder extends Seeder
             'image_url' => 'https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=800&h=600&fit=crop',
             'facebook_url' => 'https://facebook.com/gorsenayan',
             'instagram_url' => 'https://instagram.com/gorsenayan',
+            'phone' => '081234567890',
+            'email' => 'info@gorsenayan.com',
         ]);
 
         // Attach facilities to venue 1
@@ -99,6 +120,7 @@ class VenueSeeder extends Seeder
 
         // Venue 2: Futsal Center
         $venue2 = Venue::create([
+            'owner_id' => $adminUser->id,
             'name' => 'Futsal Center Jakarta',
             'slug' => 'futsal-center-jakarta',
             'description' => 'Kompleks futsal terlengkap dengan 6 lapangan indoor',
@@ -110,6 +132,8 @@ class VenueSeeder extends Seeder
             'image_url' => 'https://images.unsplash.com/photo-1551958219-acbc608c6377?w=800&h=600&fit=crop',
             'facebook_url' => null,
             'instagram_url' => 'https://instagram.com/futsalcenter',
+            'phone' => '081298765432',
+            'email' => 'info@futsalcenter.com',
         ]);
 
         $venue2->facilities()->attach([
@@ -145,6 +169,7 @@ class VenueSeeder extends Seeder
 
         // Venue 3: Arena Mini Soccer
         $venue3 = Venue::create([
+            'owner_id' => $adminUser->id, // <-- 3. TETAPKAN OWNER ID
             'name' => 'Arena Mini Soccer Plus',
             'slug' => 'arena-mini-soccer-plus',
             'description' => 'Lapangan mini soccer outdoor dengan rumput sintetis berkualitas',
@@ -156,6 +181,8 @@ class VenueSeeder extends Seeder
             'image_url' => 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&h=600&fit=crop',
             'facebook_url' => null,
             'instagram_url' => null,
+            'phone' => '085511112222',
+            'email' => 'booking@arenaminisoccer.com',
         ]);
 
         $venue3->facilities()->attach([

@@ -10,6 +10,7 @@ use App\Models\Booking;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 
 class VenueController extends Controller
 {
@@ -155,22 +156,31 @@ class VenueController extends Controller
     public function store(Request $request)
     {
         try {
+            // --- VALIDASI DIPERBARUI ---
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
                 'description' => 'required|string',
-                'address' => 'required|string',
-                'phone' => 'required|string|max:20',
-                'email' => 'required|email',
-                // ... validasi lainnya
+                'address' => 'required|string|max:255',
+                'city' => 'required|string|max:100',
+                'province' => 'required|string|max:100',
+                'image_url' => 'required|url|max:500',
+                'phone' => 'nullable|string|max:25',
+                'email' => 'nullable|email|max:100',
+                'facebook_url' => 'nullable|url|max:255',
+                'instagram_url' => 'nullable|url|max:255',
             ]);
+            // --- AKHIR PERBARUAN ---
 
             $user = Auth::user();
 
             // Auto-assign owner_id
             $validated['owner_id'] = $user->id;
 
-            // Generate slug
-            $validated['slug'] = \Illuminate\Support\Str::slug($validated['name']);
+            // Generate slug (pastikan unik jika perlu)
+            $slug = Str::slug($validated['name']);
+            $count = Venue::where('slug', 'LIKE', $slug . '%')->count();
+            $validated['slug'] = $count > 0 ? "{$slug}-{$count}" : $slug;
+
 
             $venue = Venue::create($validated);
 
@@ -184,6 +194,15 @@ class VenueController extends Controller
                 'message' => 'Venue berhasil dibuat',
                 'data' => $venue->load('owner')
             ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) { // Tangkap error validasi
+            Log::warning('Validation failed creating venue', [
+                'errors' => $e->errors()
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi gagal',
+                'errors' => $e->errors() // Kirim pesan error validasi ke frontend
+            ], 422);
         } catch (\Exception $e) {
             Log::error('Error creating venue', [
                 'error' => $e->getMessage()
@@ -221,12 +240,27 @@ class VenueController extends Controller
                 ], 403);
             }
 
+            // --- VALIDASI DIPERBARUI ---
             $validated = $request->validate([
-                'name' => 'sometimes|string|max:255',
-                'description' => 'sometimes|string',
-                'address' => 'sometimes|string',
-                // ... validasi lainnya
+                'name' => 'sometimes|required|string|max:255',
+                'description' => 'sometimes|required|string',
+                'address' => 'sometimes|required|string|max:255',
+                'city' => 'sometimes|required|string|max:100',
+                'province' => 'sometimes|required|string|max:100',
+                'image_url' => 'sometimes|required|url|max:500',
+                'phone' => 'nullable|string|max:25',
+                'email' => 'nullable|email|max:100',
+                'facebook_url' => 'nullable|url|max:255',
+                'instagram_url' => 'nullable|url|max:255',
             ]);
+            // --- AKHIR PERBARUAN ---
+
+            // Update slug jika nama berubah
+            if (isset($validated['name']) && $venue->name !== $validated['name']) {
+                $slug = Str::slug($validated['name']);
+                $count = Venue::where('slug', 'LIKE', $slug . '%')->where('id', '!=', $venue->id)->count();
+                $validated['slug'] = $count > 0 ? "{$slug}-{$count}" : $slug;
+            }
 
             $venue->update($validated);
 
@@ -235,6 +269,16 @@ class VenueController extends Controller
                 'message' => 'Venue berhasil diupdate',
                 'data' => $venue->load('owner')
             ]);
+        } catch (\Illuminate\Validation\ValidationException $e) { // Tangkap error validasi
+            Log::warning('Validation failed updating venue', [
+                'venue_id' => $id,
+                'errors' => $e->errors()
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi gagal',
+                'errors' => $e->errors() // Kirim pesan error validasi ke frontend
+            ], 422);
         } catch (\Exception $e) {
             Log::error('Error updating venue', [
                 'venue_id' => $id,
@@ -273,6 +317,29 @@ class VenueController extends Controller
                 ], 403);
             }
 
+            // PERHATIAN: Hapus relasi (fields, bookings, dll) jika diperlukan
+            // Contoh: $venue->fields()->delete(); (Akan memicu event deleting di model Field jika ada)
+            // Untuk soft delete atau cascading, atur di level database migration.
+            // Untuk saat ini, kita asumsikan ON DELETE CASCADE di database
+            // atau kita hapus manual relasinya
+
+            // Hapus TimeSlots terkait Fields dari Venue ini
+            $fieldIds = $venue->fields()->pluck('id');
+            TimeSlot::whereIn('field_id', $fieldIds)->delete();
+
+            // Hapus Fields
+            $venue->fields()->delete();
+
+            // Hapus relasi facilities (pivot table)
+            $venue->facilities()->detach();
+
+            // Hapus images
+            $venue->images()->delete();
+
+            // Hapus Bookings (jika belum di-handle oleh field)
+            Booking::whereIn('field_id', $fieldIds)->delete();
+
+            // Akhirnya, hapus venue
             $venue->delete();
 
             return response()->json([
@@ -287,7 +354,7 @@ class VenueController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal menghapus venue'
+                'message' => 'Gagal menghapus venue: ' . $e->getMessage()
             ], 500);
         }
     }

@@ -5,6 +5,8 @@ use App\Http\Controllers\Api\VenueController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BookingController;
 use App\Http\Controllers\Api\FieldController;
+use App\Http\Controllers\Api\TimeSlotController;
+use App\Http\Controllers\Api\FacilityController;
 
 // === PUBLIC ROUTES ===
 Route::post('/login', [AuthController::class, 'login']);
@@ -34,6 +36,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/bookings/{id}', [BookingController::class, 'getCustomerBookingDetail']);
     });
 
+    // Time Slots (Harga)
+    Route::apiResource('/timeslots', TimeSlotController::class);
+    Route::get('/my-fields', [TimeSlotController::class, 'getMyFieldsList']); // Helper untuk form
+
+    // Facilities
+    Route::get('/facilities', [FacilityController::class, 'index']); // Dapat semua master fasilitas
+    Route::get('/venues/{id}/facilities', [FacilityController::class, 'getVenueFacilities']); // Dapat fasilitas per venue
+    Route::post('/venues/{id}/facilities', [FacilityController::class, 'syncVenueFacilities']); // Update fasilitas per venue
+
     // Admin Routes
     Route::middleware('role:admin,super_admin')->prefix('admin')->group(function () {
         Route::get('/dashboard', [BookingController::class, 'getDashboardStats']);
@@ -43,16 +54,21 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/bookings/{id}', [BookingController::class, 'getBookingDetail']);
         Route::patch('/bookings/{id}/status', [BookingController::class, 'updateBookingStatus']);
 
-        // Admin Venues
-        Route::prefix('venues')->group(function () {
-            Route::get('/', [VenueController::class, 'index']);
-            Route::get('/{id}', [VenueController::class, 'show']);
-            Route::post('/', [VenueController::class, 'store']);
-            Route::put('/{id}', [VenueController::class, 'update']);
-            Route::delete('/{id}', [VenueController::class, 'destroy']);
-        });
-        // --- TAMBAHKAN ROUTE FIELDS DI SINI ---
+        // Admin VenuesvapiResource sudah mencakup semua method ---
+        Route::apiResource('/venues', VenueController::class);
         Route::get('/my-venues', [VenueController::class, 'getMyVenuesList']);
+
+        // --- TAMBAHKAN ROUTE FIELDS DI SINI ---
         Route::apiResource('/fields', FieldController::class);
+
+        // Time Slots (Harga)
+        Route::apiResource('/timeslots', TimeSlotController::class);
+        // Helper untuk mendapatkan daftar field (Venue - Field)
+        Route::get('/my-fields', [TimeSlotController::class, 'getMyFieldsList']);
+
+        // Facilities
+        Route::get('/facilities', [FacilityController::class, 'index']); // Dapat semua master fasilitas
+        Route::get('/venues/{id}/facilities', [FacilityController::class, 'getVenueFacilities']); // Dapat fasilitas per venue
+        Route::post('/venues/{id}/facilities', [FacilityController::class, 'syncVenueFacilities']); // Update fasilitas per venue
     });
 });

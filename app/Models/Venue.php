@@ -23,6 +23,8 @@ class Venue extends Model
         'image_url',
         'facebook_url',
         'instagram_url',
+        'phone',
+        'email',
     ];
 
     protected $casts = [
