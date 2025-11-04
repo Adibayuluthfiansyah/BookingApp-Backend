@@ -1,0 +1,9 @@
+# Abaikan folder vendor (akan di-install di dalam Docker)
+vendor/
+
+# Abaikan folder storage (ini akan di-mount sebagai volume)
+storage/
+
+# Abaikan folder Git
+.git/
+.gitignore
