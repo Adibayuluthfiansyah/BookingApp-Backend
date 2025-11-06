@@ -2,6 +2,12 @@
 FROM php:8.2-fpm-alpine AS base
 WORKDIR /var/www/html
 
+# --- PERBAIKAN: BUAT USER 'www-data' SECARA EKSPLISIT ---
+# Ini memastikan user & group ada sebelum kita menggunakannya
+# RUN addgroup -g 82 -S www-data && \
+#     adduser -u 82 -S www-data -G www-data
+# ----------------------------------------------------
+
 # Install dependensi sistem
 RUN apk update && \
     apk add --no-cache \
@@ -22,17 +28,14 @@ COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 FROM base AS builder
 
 WORKDIR /var/www/html
-
 COPY . .
 
-# Buat folder storage sebelum composer install (PENTING!)
+# Buat folder storage & set kepemilikan
 RUN mkdir -p storage/framework/{cache,sessions,views} \
     && mkdir -p storage/logs \
     && mkdir -p storage/app/public \
-    && mkdir -p bootstrap/cache
-
-# Ganti kepemilikan file
-RUN chown -R www-data:www-data /var/www/html
+    && mkdir -p bootstrap/cache \
+    && chown -R www-data:www-data /var/www/html
 
 # Jalankan composer sebagai user 'www-data'
 USER www-data
@@ -45,36 +48,25 @@ USER root
 # Tahap 3: Development Image
 # -----------------------------------------------------------------
 FROM base AS development
-
 WORKDIR /var/www/html
 
-# Buat folder storage untuk development
-RUN mkdir -p storage/framework/{cache,sessions,views} \
-    && mkdir -p storage/logs \
-    && mkdir -p storage/app/public \
-    && mkdir -p bootstrap/cache \
-    && chown -R www-data:www-data /var/www/html \
+# Set permissions untuk development
+RUN chown -R www-data:www-data /var/www/html \
     && chmod -R 775 storage bootstrap/cache
 
-
+# CMD harus dijalankan sebagai ROOT
 CMD ["php-fpm"]
 
 # -----------------------------------------------------------------
 # Tahap 4: Production Image (Optimized)
 # -----------------------------------------------------------------
 FROM base AS production
-
 WORKDIR /var/www/html
+COPY --from=builder --chown=www-data:www-data /var/www/html .
 
-# Copy file yang sudah di-build
-COPY --from=builder --chown=www-data:www-data /var/www/html /var/www/html
-
-# Pastikan folder ada dan set permissions (DOUBLE CHECK!)
-RUN mkdir -p storage/framework/{cache,sessions,views} \
-    && mkdir -p storage/logs \
-    && mkdir -p storage/app/public \
-    && mkdir -p bootstrap/cache \
-    && chown -R www-data:www-data storage bootstrap/cache \
+# Pastikan folder ada dan set permissions
+RUN chown -R www-data:www-data storage bootstrap/cache \
     && chmod -R 775 storage bootstrap/cache
 
+# CMD harus dijalankan sebagai ROOT
 CMD ["php-fpm"]

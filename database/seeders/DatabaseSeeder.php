@@ -17,8 +17,8 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             // UserSeeder::class,
-            VenueSeeder::class,       // 1. Buat Venues, Fields, dan TimeSlots
             VenueOwnerSeeder::class,
+            VenueSeeder::class,       // 1. Buat Venues, Fields, dan TimeSlots
         ]);
     }
 }
