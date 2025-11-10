@@ -10,13 +10,12 @@ use App\Models\Booking;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class VenueController extends Controller
 {
-    /**
-     * Get all venues (filtered by owner for admin)
-     */
+
     public function index(Request $request)
     {
         try {
@@ -90,9 +89,6 @@ class VenueController extends Controller
         }
     }
 
-    /**
-     * Get venue by ID or slug (with owner check)
-     */
     public function show($identifier)
     {
         try {
@@ -150,6 +146,7 @@ class VenueController extends Controller
         }
     }
 
+
     /**
      * Create new venue (Admin only)
      */
@@ -163,20 +160,27 @@ class VenueController extends Controller
                 'address' => 'required|string|max:255',
                 'city' => 'required|string|max:100',
                 'province' => 'required|string|max:100',
-                'image_url' => 'required|url|max:500',
+                'image_file' => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
                 'phone' => 'nullable|string|max:25',
                 'email' => 'nullable|email|max:100',
                 'facebook_url' => 'nullable|url|max:255',
                 'instagram_url' => 'nullable|url|max:255',
             ]);
-            // --- AKHIR PERBARUAN ---
+
 
             $user = Auth::user();
 
             // Auto-assign owner_id
             $validated['owner_id'] = $user->id;
 
-            // Generate slug (pastikan unik jika perlu)
+            // Handle File Upload
+            if ($request->hasFile('image_file')) {
+                // Simpan file dan dapatkan path-nya
+                $path = $request->file('image_file')->store('uploads/venues', 'public');
+                $validated['image_url'] = $path; // Simpan path ke kolom image_url
+            }
+
+            // Generate slug
             $slug = Str::slug($validated['name']);
             $count = Venue::where('slug', 'LIKE', $slug . '%')->count();
             $validated['slug'] = $count > 0 ? "{$slug}-{$count}" : $slug;
@@ -194,14 +198,14 @@ class VenueController extends Controller
                 'message' => 'Venue berhasil dibuat',
                 'data' => $venue->load('owner')
             ], 201);
-        } catch (\Illuminate\Validation\ValidationException $e) { // Tangkap error validasi
+        } catch (\Illuminate\Validation\ValidationException $e) {
             Log::warning('Validation failed creating venue', [
                 'errors' => $e->errors()
             ]);
             return response()->json([
                 'success' => false,
                 'message' => 'Validasi gagal',
-                'errors' => $e->errors() // Kirim pesan error validasi ke frontend
+                'errors' => $e->errors()
             ], 422);
         } catch (\Exception $e) {
             Log::error('Error creating venue', [
@@ -232,7 +236,7 @@ class VenueController extends Controller
                 ], 404);
             }
 
-            // Check ownership (kecuali super admin)
+            // Check ownership
             if ($user->role !== 'super_admin' && $venue->owner_id !== $user->id) {
                 return response()->json([
                     'success' => false,
@@ -240,20 +244,30 @@ class VenueController extends Controller
                 ], 403);
             }
 
-            // --- VALIDASI DIPERBARUI ---
+            // 'sometimes' hanya validasi jika field itu ada di request
             $validated = $request->validate([
                 'name' => 'sometimes|required|string|max:255',
                 'description' => 'sometimes|required|string',
                 'address' => 'sometimes|required|string|max:255',
                 'city' => 'sometimes|required|string|max:100',
                 'province' => 'sometimes|required|string|max:100',
-                'image_url' => 'sometimes|required|url|max:500',
+                'image_file' => 'sometimes|nullable|image|mimes:jpeg,png,jpg,webp|max:2048', // File-nya opsional
                 'phone' => 'nullable|string|max:25',
                 'email' => 'nullable|email|max:100',
                 'facebook_url' => 'nullable|url|max:255',
                 'instagram_url' => 'nullable|url|max:255',
             ]);
-            // --- AKHIR PERBARUAN ---
+
+            // Handle File Upload (jika ada file baru)
+            if ($request->hasFile('image_file')) {
+                // Hapus gambar lama jika ada
+                if ($venue->image_url) {
+                    Storage::disk('public')->delete($venue->image_url);
+                }
+                // Simpan file baru
+                $path = $request->file('image_file')->store('uploads/venues', 'public');
+                $validated['image_url'] = $path; // Simpan path baru
+            }
 
             // Update slug jika nama berubah
             if (isset($validated['name']) && $venue->name !== $validated['name']) {
@@ -269,7 +283,7 @@ class VenueController extends Controller
                 'message' => 'Venue berhasil diupdate',
                 'data' => $venue->load('owner')
             ]);
-        } catch (\Illuminate\Validation\ValidationException $e) { // Tangkap error validasi
+        } catch (\Illuminate\Validation\ValidationException $e) {
             Log::warning('Validation failed updating venue', [
                 'venue_id' => $id,
                 'errors' => $e->errors()
@@ -277,7 +291,7 @@ class VenueController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Validasi gagal',
-                'errors' => $e->errors() // Kirim pesan error validasi ke frontend
+                'errors' => $e->errors()
             ], 422);
         } catch (\Exception $e) {
             Log::error('Error updating venue', [
@@ -292,9 +306,6 @@ class VenueController extends Controller
         }
     }
 
-    /**
-     * Delete venue (Admin only, must own the venue)
-     */
     public function destroy($id)
     {
         try {
@@ -317,11 +328,10 @@ class VenueController extends Controller
                 ], 403);
             }
 
-            // PERHATIAN: Hapus relasi (fields, bookings, dll) jika diperlukan
-            // Contoh: $venue->fields()->delete(); (Akan memicu event deleting di model Field jika ada)
-            // Untuk soft delete atau cascading, atur di level database migration.
-            // Untuk saat ini, kita asumsikan ON DELETE CASCADE di database
-            // atau kita hapus manual relasinya
+            // Hapus gambar utama dari storage
+            if ($venue->image_url) {
+                Storage::disk('public')->delete($venue->image_url);
+            }
 
             // Hapus TimeSlots terkait Fields dari Venue ini
             $fieldIds = $venue->fields()->pluck('id');
@@ -333,8 +343,14 @@ class VenueController extends Controller
             // Hapus relasi facilities (pivot table)
             $venue->facilities()->detach();
 
-            // Hapus images
-            $venue->images()->delete();
+            // Hapus images (VenueImage)
+            $venue->images()->each(function ($image) {
+                // Asumsi VenueImage juga punya path di storage
+                if ($image->image_url) {
+                    Storage::disk('public')->delete($image->image_url);
+                }
+                $image->delete();
+            });
 
             // Hapus Bookings (jika belum di-handle oleh field)
             Booking::whereIn('field_id', $fieldIds)->delete();
@@ -359,11 +375,6 @@ class VenueController extends Controller
         }
     }
 
-
-    /**
-     * Get a simple list of venues (ID and Name) owned by the admin.
-     * Digunakan untuk dropdown form.
-     */
     public function getMyVenuesList(Request $request)
     {
         try {
@@ -394,9 +405,6 @@ class VenueController extends Controller
         }
     }
 
-    /**
-     * Get available slots (OPTIMIZED dengan auto-release past slots)
-     */
     public function getAvailableSlots(Request $request, $venueId)
     {
         try {
@@ -537,9 +545,6 @@ class VenueController extends Controller
         }
     }
 
-    /**
-     * Auto-complete past bookings (helper method)
-     */
     private function autoCompletePastBookings($fieldId, $date, $currentTime)
     {
         try {

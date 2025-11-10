@@ -41,7 +41,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/my-fields', [TimeSlotController::class, 'getMyFieldsList']); // Helper untuk form
 
     // Facilities
-    Route::get('/facilities', [FacilityController::class, 'index']); // Dapat semua master fasilitas
+    Route::get('/facilities', [FacilityController::class, 'index']); // Get all fasilitas
     Route::get('/venues/{id}/facilities', [FacilityController::class, 'getVenueFacilities']); // Dapat fasilitas per venue
     Route::post('/venues/{id}/facilities', [FacilityController::class, 'syncVenueFacilities']); // Update fasilitas per venue
 
@@ -54,11 +54,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/bookings/{id}', [BookingController::class, 'getBookingDetail']);
         Route::patch('/bookings/{id}/status', [BookingController::class, 'updateBookingStatus']);
 
-        // Admin VenuesvapiResource sudah mencakup semua method ---
+
+        // Menangani update (via POST) untuk upload file dari form edit.
+        Route::post('/venues/{id}', [VenueController::class, 'update']);
+
+        // Admin VenuesvapiResource  ---
         Route::apiResource('/venues', VenueController::class);
         Route::get('/my-venues', [VenueController::class, 'getMyVenuesList']);
 
-        // --- TAMBAHKAN ROUTE FIELDS DI SINI ---
+        // --- ROUTE FIELDS ---
         Route::apiResource('/fields', FieldController::class);
 
         // Time Slots (Harga)
