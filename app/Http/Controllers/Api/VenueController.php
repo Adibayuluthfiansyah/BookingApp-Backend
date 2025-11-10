@@ -9,7 +9,7 @@ use App\Models\TimeSlot;
 use App\Models\Booking;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Auth; // Tetap gunakan ini
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -19,13 +19,17 @@ class VenueController extends Controller
     public function index(Request $request)
     {
         try {
+            // PERBAIKAN: Gunakan $request->user()
+            $user = $request->user();
+
             $query = Venue::with(['fields.timeSlots', 'facilities', 'images', 'owner:id,name,email']);
 
             // Filter by owner jika bukan super admin
-            $user = Auth::user();
-            if ($user && $user->role === 'admin') {
+            if ($user && ($user->role === 'admin' || $user->role === 'owner')) { // (Saya tambahkan 'owner' untuk konsistensi)
                 $query->where('owner_id', $user->id);
             }
+
+            // ... (sisa kode index Anda sudah OK) ...
 
             // Search
             if ($request->has('search')) {
@@ -46,7 +50,6 @@ class VenueController extends Controller
             if ($request->has('sort')) {
                 switch ($request->sort) {
                     case 'price':
-                        // Sort by minimum price (requires subquery)
                         break;
                     case 'name':
                         $query->orderBy('name', 'asc');
@@ -72,7 +75,7 @@ class VenueController extends Controller
                 'data' => $venues,
                 'meta' => [
                     'total' => $venues->count(),
-                    'is_filtered' => $user && $user->role === 'admin'
+                    'is_filtered' => $user && ($user->role === 'admin' || $user->role === 'owner')
                 ]
             ]);
         } catch (\Exception $e) {
@@ -89,7 +92,7 @@ class VenueController extends Controller
         }
     }
 
-    public function show($identifier)
+    public function show(Request $request, $identifier) // PERBAIKAN: Tambahkan Request $request
     {
         try {
             Log::info('Fetching venue', ['identifier' => $identifier]);
@@ -103,9 +106,9 @@ class VenueController extends Controller
                 ->where('id', $identifier)
                 ->orWhere('slug', $identifier);
 
-            // Filter by owner jika admin
-            $user = Auth::user();
-            if ($user && $user->role === 'admin') {
+            // PERBAIKAN: Gunakan $request->user()
+            $user = $request->user();
+            if ($user && ($user->role === 'admin' || $user->role === 'owner')) {
                 $query->where('owner_id', $user->id);
             }
 
@@ -160,23 +163,24 @@ class VenueController extends Controller
                 'address' => 'required|string|max:255',
                 'city' => 'required|string|max:100',
                 'province' => 'required|string|max:100',
-                'image_file' => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
+                // NAMA FIELD KITA SAMAKAN DENGAN FRONTEND
+                'main_image' => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
                 'phone' => 'nullable|string|max:25',
                 'email' => 'nullable|email|max:100',
                 'facebook_url' => 'nullable|url|max:255',
                 'instagram_url' => 'nullable|url|max:255',
             ]);
 
-
-            $user = Auth::user();
+            // PERBAIKAN: Gunakan $request->user()
+            $user = $request->user();
 
             // Auto-assign owner_id
             $validated['owner_id'] = $user->id;
 
             // Handle File Upload
-            if ($request->hasFile('image_file')) {
+            if ($request->hasFile('main_image')) { // PERBAIKAN: Sesuaikan nama field
                 // Simpan file dan dapatkan path-nya
-                $path = $request->file('image_file')->store('uploads/venues', 'public');
+                $path = $request->file('main_image')->store('uploads/venues', 'public'); // PERBAIKAN: Sesuaikan nama field
                 $validated['image_url'] = $path; // Simpan path ke kolom image_url
             }
 
@@ -225,7 +229,8 @@ class VenueController extends Controller
     public function update(Request $request, $id)
     {
         try {
-            $user = Auth::user();
+            // PERBAIKAN: Gunakan $request->user()
+            $user = $request->user();
 
             $venue = Venue::find($id);
 
@@ -251,7 +256,7 @@ class VenueController extends Controller
                 'address' => 'sometimes|required|string|max:255',
                 'city' => 'sometimes|required|string|max:100',
                 'province' => 'sometimes|required|string|max:100',
-                'image_file' => 'sometimes|nullable|image|mimes:jpeg,png,jpg,webp|max:2048', // File-nya opsional
+                'main_image' => 'sometimes|nullable|image|mimes:jpeg,png,jpg,webp|max:2048', // PERBAIKAN: Sesuaikan nama field
                 'phone' => 'nullable|string|max:25',
                 'email' => 'nullable|email|max:100',
                 'facebook_url' => 'nullable|url|max:255',
@@ -259,13 +264,13 @@ class VenueController extends Controller
             ]);
 
             // Handle File Upload (jika ada file baru)
-            if ($request->hasFile('image_file')) {
+            if ($request->hasFile('main_image')) { // PERBAIKAN: Sesuaikan nama field
                 // Hapus gambar lama jika ada
                 if ($venue->image_url) {
                     Storage::disk('public')->delete($venue->image_url);
                 }
                 // Simpan file baru
-                $path = $request->file('image_file')->store('uploads/venues', 'public');
+                $path = $request->file('main_image')->store('uploads/venues', 'public'); // PERBAIKAN: Sesuaikan nama field
                 $validated['image_url'] = $path; // Simpan path baru
             }
 
@@ -306,10 +311,11 @@ class VenueController extends Controller
         }
     }
 
-    public function destroy($id)
+    public function destroy(Request $request, $id) // PERBAIKAN: Tambahkan Request $request
     {
         try {
-            $user = Auth::user();
+            // PERBAIKAN: Gunakan $request->user()
+            $user = $request->user();
 
             $venue = Venue::find($id);
 
@@ -327,6 +333,8 @@ class VenueController extends Controller
                     'message' => 'Anda tidak memiliki akses untuk menghapus venue ini'
                 ], 403);
             }
+
+            // ... (sisa kode destroy Anda sudah OK) ...
 
             // Hapus gambar utama dari storage
             if ($venue->image_url) {
@@ -378,10 +386,11 @@ class VenueController extends Controller
     public function getMyVenuesList(Request $request)
     {
         try {
+            // PERBAIKAN: $request->user() sudah pasti ada di sini
             $user = $request->user();
             $query = Venue::query();
 
-            if ($user->role === 'admin') {
+            if ($user->role === 'admin' || $user->role === 'owner') {
                 $query->where('owner_id', $user->id);
             }
             // super_admin akan mendapatkan semua
@@ -404,6 +413,9 @@ class VenueController extends Controller
             ], 500);
         }
     }
+
+    // ... (sisa kode getAvailableSlots dan autoCompletePastBookings Anda sudah OK) ...
+    // ... (Pastikan Anda menyalinnya juga jika Anda mengganti seluruh file) ...
 
     public function getAvailableSlots(Request $request, $venueId)
     {
