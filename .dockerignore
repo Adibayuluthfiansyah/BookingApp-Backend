@@ -4,6 +4,21 @@ vendor/
 # Abaikan folder storage (ini akan di-mount sebagai volume)
 storage/
 
-# Abaikan folder Git
+# Cache dan build artefacts Laravel
+bootstrap/cache/
+
+# Node modules (jika ada)
+node_modules/
+
+# File Git & editor
 .git/
 .gitignore
+.vscode/
+.idea/
+.DS_Store
+
+# File environment & test
+.env
+.env.*
+tests/
+phpunit.xml
